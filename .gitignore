@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# OpenClaw reference (for docs only)
+.openclaw-reference/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# State
+state/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/
+*.log
+
+# Runtime
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+tmp/
+temp/
+*.tmp

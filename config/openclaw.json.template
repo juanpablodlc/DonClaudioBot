@@ -1,0 +1,49 @@
+{
+  "$schema": "https://openclaw.bot/schema.json",
+  "gateway": {
+    "mode": "local",
+    "bind": "ws://127.0.0.1:18789",
+    "token": "${GATEWAY_TOKEN:-change-me}"
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "~/.openclaw/workspace",
+      "sandbox": {
+        "mode": "off"
+      }
+    },
+    "list": [
+      {
+        "id": "onboarding",
+        "name": "Onboarding Assistant",
+        "workspace": "~/.openclaw/workspace-onboarding",
+        "default": true,
+        "sandbox": {
+          "mode": "off"
+        }
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "agentId": "onboarding",
+      "match": {
+        "channel": "whatsapp"
+      }
+    }
+  ],
+  "channels": {
+    "whatsapp": {
+      "allowFrom": ["*"],
+      "dmPolicy": "allowlist"
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "hooks": {
+    "enabled": true,
+    "token": "${HOOK_TOKEN:-change-me}",
+    "path": "/hooks"
+  }
+}

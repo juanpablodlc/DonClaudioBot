@@ -1,5 +1,57 @@
-# Docker Compose Configuration
-# [PLACEHOLDER - To be implemented by AI team]
+version: '3.8'
 
-# TODO: Define services, ports, volumes, networks
-# TODO: Consider how OpenClaw gateway and onboarding service coexist
+services:
+  don-claudio-bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: don-claudio-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # Onboarding service
+      - "18789:18789" # OpenClaw gateway
+    volumes:
+      # CRITICAL: This volume preserves WhatsApp auth and all state across deployments
+      # When you update code, this volume stays attached - WhatsApp stays authenticated
+      - don-claudio-state:/root/.openclaw
+
+      # Docker socket for sandbox containers
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=production
+      - GATEWAY_TOKEN=${GATEWAY_TOKEN:-change-me}
+      - HOOK_TOKEN=${HOOK_TOKEN:-change-me}
+    networks:
+      - don-claudio-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  # Persistent state - survives deployments
+  # Contains:
+  # - ~/.openclaw/credentials/whatsapp/ (WhatsApp auth - survives code updates)
+  # - ~/.openclaw/openclaw.json (config)
+  # - ~/.openclaw/onboarding.db (onboarding state)
+  # - ~/.openclaw/agents/*/ (per-agent sessions and data)
+  don-claudio-state:
+    driver: local
+
+networks:
+  don-claudio-network:
+    driver: bridge
+
+# NOTE: Updating code does NOT affect the volume
+# When you run `docker compose up -d --build`:
+# - New container image is built with your code
+# - Old container is gracefully stopped
+# - VOLUME STAYS ATTACHED - WhatsApp auth preserved
+# - New container starts with existing state
+#
+# To destroy everything (including WhatsApp auth):
+#   docker compose down
+#   docker volume rm don-claudio-state
+#   docker compose up -d --build  # Fresh start, will need WhatsApp re-auth

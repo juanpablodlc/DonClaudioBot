@@ -2,9 +2,9 @@
 
 DonClaudioBot is a WhatsApp-based multi-user AI assistant service. Each user gets a sandboxed agent with Google OAuth (Gmail/Calendar). This is v2 — a complete redesign of Clawd4All that fixes the timing problem where OAuth happened before sandbox creation.
 
-The key architectural fix: create agents with sandbox config FIRST, then do OAuth in that agent's context. OpenClaw is used as an npm dependency (not fork), and agents are created dynamically (no pre-provisioning). Onboarding is a deterministic Node.js service with SQLite, not LLM-driven instructions.
+The key architectural fix: create agents with sandbox config FIRST, then do OAuth in that agent's context. OpenClaw is used as an npm dependency (not fork), and agents are created dynamically (no pre-provisioning). Onboarding is a deterministic Node.js service with some solution like SQLite (TBC), not solely LLM-driven instructions.
 
-Deployment to Hetzner uses Docker with persistent volumes — so WhatsApp authentication survives code updates. The `.openclaw-reference/` folder contains OpenClaw source for docs only (gitignored). See ARCHITECTURE_REPORT.md sections 1-3 for v1 post-mortem and v2 architecture decisions.
+Deployment to Hetzner uses Docker with persistent volumes — so WhatsApp authentication survives code updates. The `.openclaw-reference/` folder contains OpenClaw source for docs only (gitignored). See ARCHITECTURE_REPORT.md sections 1-3 for v1 post-mortem and v2 architecture decisions. Use the QDM skill MCP below to always refer to the openclaw reference. 
 
 ## Which Doc to Read
 

@@ -10,8 +10,8 @@ Deployment to Hetzner uses Docker with persistent volumes — so WhatsApp authen
 
 | Question | Read This |
 |----------|-----------|
-| "What should I build?" | **ARCHITECTURE_REPORT.md** - Complete design (10 sections) |
-| "How do I deploy?" | **DEPLOYMENT.md** - Hetzner deployment, volume persistence |
+| "What should I build?" | **ARCHITECTURE_REPORT.md** - Complete design |
+| "How do I deploy?" | **DEPLOYMENT.md** - Hetzner deployment proposal for volume persistence |
 | "What's the context?" | **Git commit messages** - Run `git log -1` to see latest context |
 
 **Context from v1:** See the ARchitecture report first sections. 

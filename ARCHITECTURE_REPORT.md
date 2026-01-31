@@ -18,6 +18,7 @@
 8. [Technology Stack & Dependencies](#8-technology-stack--dependencies)
 9. [Project Structure](#9-project-structure)
 10. [Implementation Roadmap](#10-implementation-roadmap)
+11. [Decision Points & Resolutions](#11-decision-points--resolutions)
 
 ---
 
@@ -170,7 +171,7 @@ OpenClaw is an open-source gateway framework that:
 
 #### 4.2.1 Multi-Agent Routing
 
-OpenClaw supports multiple isolated agents in one gateway:
+OpenClaw supports multiple isolated agents with deterministic routing via bindings:
 
 ```json
 {
@@ -186,7 +187,7 @@ OpenClaw supports multiple isolated agents in one gateway:
 }
 ```
 
-**Key insight:** Each agent has its own workspace, auth, and sessions. Routing is deterministic via bindings.
+Each agent has its own workspace, auth, and sessions. Bindings route specific senders to specific agents.
 
 #### 4.2.2 Per-Agent Sandboxing
 
@@ -206,34 +207,35 @@ Each agent can run in its own Docker container:
 }
 ```
 
-**For DonClaudioBot:** Each user's agent gets a sandbox with unique OAuth tokens.
+DonClaudioBot uses `scope: "agent"` so each user gets their own sandboxed container with isolated OAuth tokens.
 
 #### 4.2.3 Per-Agent Auth
 
-Each agent has its own auth directory:
+Auth profiles are stored per-agent (not shared):
 
 ```
 ~/.openclaw/agents/<agentId>/agent/auth-profiles.json
 ```
 
-**For DonClaudioBot:** Each user's Google OAuth tokens are isolated in their agent's auth dir.
+Google OAuth tokens for each user live in their agent's auth directory, isolated from other users.
 
 #### 4.2.4 Dynamic Agent Creation
 
-Agents can be added via CLI:
+Agents can be added via CLI without restarting the gateway:
 
 ```bash
 openclaw agents add <name>
+openclaw gateway reload  # Apply changes
 ```
 
-**For DonClaudioBot:** Create agents on-demand during onboarding, no pre-provisioning.
+DonClaudioBot creates agents on-demand during onboarding—no pre-provisioning required.
 
 #### 4.2.5 Hooks and Webhooks
 
-- **Hooks:** Event-driven automation inside gateway
+- **Hooks:** Event-driven automation inside gateway (runs on events like `command:new`)
 - **Webhooks:** External HTTP triggers for agent execution
 
-**For DonClaudioBot:** Use hooks to trigger onboarding service on first message.
+The onboarding flow uses a `command:new` hook to trigger agent creation when a new user messages.
 
 ### 4.3 OpenClaw as Dependency (Not Fork)
 
@@ -339,96 +341,27 @@ v2 Flow (Fixed):
 
 ### 6.1 Flow Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          ONBOARDING FLOW                                 │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  Step 1: Initial Contact                                                 │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ User sends WhatsApp message                                        │ │
-│  │ ↓                                                                  │ │
-│  │ Routes to onboarding agent (user001) via channel-level binding    │ │
-│  │ ↓                                                                  │ │
-│  │ Hook triggers: POST /webhook/onboarding                            │ │
-│  │   Payload: { phone: "+15551234567" }                               │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  Step 2: Check State                                                    │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ Onboarding service checks SQLite:                                  │ │
-│  │ - Is this phone number already onboarded?                         │ │
-│  │ - If yes: return existing agent ID                                 │ │
-│  │ - If no: proceed to Step 3                                         │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  Step 3: Create Dedicated Agent                                         │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ Generate agent ID: user_<uuid_short>                               │ │
-│  │ ↓                                                                  │ │
-│  │ Call OpenClaw API: openclaw agents add <id>                       │ │
-│  │ ↓                                                                  │ │
-│  │ Update openclaw.json:                                              │ │
-│  │   - Add agent to agents.list                                       │ │
-│  │   - Add binding: phone → agent                                     │ │
-│  │   - Configure sandbox:                                             │ │
-│  │     * mode: "all"                                                  │ │
-│  │     * scope: "agent"                                               │ │
-│  │     * workspace: ~/.openclaw/workspace-<id>                       │ │
-│  │     * agentDir: ~/.openclaw/agents/<id>/agent                     │ │
-│  │ ↓                                                                  │ │
-│  │ Reload gateway config                                              │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  Step 4: Store State                                                    │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ Insert into SQLite:                                                 │ │
-│  │   phone_number: "+15551234567"                                     │ │
-│  │   agent_id: "user_abc123"                                          │ │
-│  │   status: "pending_welcome"                                        │ │
-│  │   created_at: timestamp                                            │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  Step 5: Send Welcome Message                                           │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ Onboarding agent sends:                                            │ │
-│  │ "Welcome to DonClaudioBot! Your personal AI agent is ready.        │ │
-│  │  I'm user001, the onboarding assistant. Your dedicated agent      │ │
-│  │  will take over after this conversation."                          │ │
-│  │ ↓                                                                  │ │
-│  │ Collect: name, email                                               │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  Step 6: Trigger Handover                                               │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ Update SQLite status: "ready_for_handover"                         │ │
-│  │ ↓                                                                  │ │
-│  │ Send message: "Your agent is ready! Send any message to           │ │
-│  │               continue chatting with your personal assistant."     │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  Step 7: User's Next Message                                            │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ User sends message                                                 │ │
-│  │ ↓                                                                  │ │
-│  │ Routes to dedicated agent via binding (not user001)               │ │
-│  │ ↓                                                                  │
-│  │ Dedicated agent responds with personalized greeting               │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  Step 8: OAuth (Optional, in Dedicated Agent)                           │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │ User requests Google access                                        │ │
-│  │ ↓                                                                  │ │
-│  │ Dedicated agent runs gog OAuth flow                                │ │
-│  │ ↓                                                                  │ │
-│  │ Tokens stored in: ~/.openclaw/agents/<id>/agent/                  │ │
-│  │ ↓                                                                  │
-│  │ Agent can now access Gmail, Calendar                               │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+**Core principle:** Create the agent WITH sandbox config FIRST, then do OAuth in that agent's context. This fixes v1's timing bug where OAuth happened before the sandbox environment existed.
+
+**Step-by-step:**
+
+| Step | What Happens | Component Responsible |
+|------|--------------|----------------------|
+| 1 | User messages WhatsApp → routes to onboarding agent (user001) | OpenClaw routing + `command:new` hook |
+| 2 | Check if phone already has an agent (idempotent) | SQLite lookup by phone number |
+| 3 | Create dedicated agent with sandbox config, add phone→agent binding | Onboarding service → `openclaw agents add` |
+| 4 | Store phone→agent mapping in database with status `pending_welcome` | SQLite INSERT |
+| 5 | Onboarding agent welcomes user, collects name/email | user001 AGENTS.md prompt |
+| 6 | Mark status `ready_for_handover`, notify user to send next message | SQLite UPDATE |
+| 7 | User's next message routes to dedicated agent (binding takes effect) | OpenClaw routing engine |
+| 8 | User optionally connects Google OAuth → tokens stored in agent's isolated dir | Dedicated agent runs `gog auth` |
+
+**Why this works (v2 vs v1):**
+- **v1 (broken):** OAuth in user001 → migrate tokens → add sandbox config
+- **v2 (fixed):** Agent + sandbox created → binding added → OAuth in target agent
+
+The sandbox and agent directory exist BEFORE `gog auth` runs, so tokens land in `~/.openclaw/agents/<id>/agent/.gog/` (isolated) instead of a shared location.
+
 
 ### 6.2 State Transitions
 
@@ -440,22 +373,28 @@ v2 Flow (Fixed):
 
 ### 6.3 Onboarding Service API
 
+**⚠️ OPEN DECISION — Requires investigation via QMD:**
+
+The webhook endpoint is required (hook calls it). The other endpoints may be **internal functions** rather than exposed HTTP APIs.
+
 ```
 POST /webhook/onboarding
   Request: { phone: "+15551234567" }
   Response: { status: "new" | "existing", agentId?: string }
-
-GET /onboarding/state/:phone
-  Response: { agentId, status, name, email, createdAt }
-
-POST /onboarding/update
-  Request: { phone, name?, email? }
-  Response: { success: boolean }
-
-POST /onboarding/handover
-  Request: { phone }
-  Response: { success: boolean, agentId }
 ```
+**Confirmed required:** Called by OpenClaw's `command:new` hook to trigger agent creation.
+
+**Investigation needed for:**
+| Endpoint | Purpose | Alternative |
+|----------|---------|-------------|
+| `GET /onboarding/state/:phone` | Query user state | Internal SQLite query |
+| `POST /onboarding/update` | Update name/email | Internal DB update |
+| `POST /onboarding/handover` | Trigger handover | Internal state transition |
+
+**Task for implementation agent:** Use `mcp__qmd__search` or `mcp__qmd__vsearch` on `.openclaw-reference` to investigate:
+- Does OpenClaw's hook system require HTTP callbacks, or can hooks call local functions?
+- Are there examples of hooks that make internal state changes without exposing REST APIs?
+- Decision: Single webhook endpoint vs. full REST API for admin/debug purposes
 
 ---
 
@@ -760,9 +699,234 @@ DonClaudioBot/
 
 ---
 
+## 11. Decision Points & Resolutions
+
+**Status:** Iterative decision-making process — 3 of 5 decision points resolved.
+
+---
+
+### 11.1 Decision Point 1: OpenClaw Integration Strategy ✅ RESOLVED
+
+**Question:** How does the Onboarding Service communicate with OpenClaw?
+
+**Decision:** CLI Wrapper — matches v1's proven pattern, uses documented interface, fast enough for initial scale.
+
+**Implementation approach:**
+
+**File: `onboarding/src/services/agent-creator.ts`**
+```typescript
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
+
+export async function createAgent(options: CreateAgentOptions): Promise<string> {
+  const { agentId, phoneNumber } = options;
+
+  // Step 1: Create agent via CLI
+  await execAsync(`openclaw agents add ${agentId}`);
+
+  // Step 2: Update config (add sandbox + binding) via config-writer.ts
+  await updateConfig(agentId, phoneNumber);
+
+  // Step 3: Reload gateway
+  await execAsync('openclaw gateway reload');
+
+  return agentId;
+}
+```
+
+**Required components:**
+- `agent-creator.ts` — CLI wrapper calling `openclaw agents add`
+- `config-writer.ts` — Atomic config updates (write temp file, then `mv` to overwrite)
+- File locking — Use `proper-lockfile` package for concurrent operations
+- Error handling — Rollback in reverse order if any step fails
+
+**References:** `.openclaw-reference/cli/agents.md`, v1 `claim-agent.sh`
+
+---
+
+### 11.2 Decision Point 2: Hook vs. Webhook ✅ RESOLVED
+
+**Question:** How does WhatsApp trigger the onboarding flow?
+
+**Decision:** `command:new` hook triggers external webhook (`POST /webhook/onboarding`).
+
+**Why:** `message:received` event is not implemented in OpenClaw. `command:new` is the viable path.
+
+**Implementation options:**
+
+**Option A: Webhook (Recommended)** — Hook calls Express service, which manages state in SQLite and creates agents. Useful for debugging, allows HTTP-based testing.
+
+**Option B: Direct Hook** — Hook directly calls `openclaw agents add` and updates config. Simpler but harder to test/debug.
+
+**Hook structure:**
+```
+~/.openclaw/hooks/onboarding-trigger/
+├── HOOK.md                    # Metadata: events=["command:new"], requires bins=["node"]
+├── handler.ts                 # Hook handler code
+└── package.json               # Hook dependencies
+```
+
+**File: `handler.ts`**
+```typescript
+import type { HookHandler } from '../../src/hooks/hooks.js';
+
+const handler: HookHandler = async (event) => {
+  if (event.type !== 'command' || event.action !== 'new') return;
+
+  const phone = event.context.senderId;
+  if (!phone || event.context.commandSource !== 'whatsapp') return;
+
+  // Trigger onboarding service
+  await fetch('http://127.0.0.1:3000/webhook/onboarding', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${process.env.HOOK_TOKEN}` },
+    body: JSON.stringify({ phone }),
+  });
+};
+
+export default handler;
+```
+
+**References:** `.openclaw-reference/docs/hooks.md`, webhook auth via `hooks.token`
+
+---
+
+### 11.3 Decision Point 3: Database Schema ✅ RESOLVED
+
+**Question:** What is the concrete SQLite schema?
+
+**Decision:** Schema designed with state transitions, audit trail, and concurrency safety.
+
+**Schema:**
+```sql
+-- ============================================================
+-- DonClaudioBot v2: Onboarding State Database Schema
+-- ============================================================
+-- File: ~/.openclaw/onboarding.db
+
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000; -- 5 second lock timeout
+
+-- Core onboarding states table
+CREATE TABLE IF NOT EXISTS onboarding_states (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone_number TEXT NOT NULL UNIQUE,          -- E.164 format: +15551234567
+  agent_id TEXT NOT NULL UNIQUE,              -- OpenClaw agent ID: user_abc123
+  status TEXT NOT NULL DEFAULT 'new',
+  name TEXT,
+  email TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT,                            -- NULL = never expires
+  CHECK(phone_number LIKE '+%')               -- E.164 validation
+);
+
+-- Status transitions log (audit trail)
+CREATE TABLE IF NOT EXISTS state_transitions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone_number TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  transitioned_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (phone_number) REFERENCES onboarding_states(phone_number) ON DELETE CASCADE
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_phone_lookup
+  ON onboarding_states(phone_number)
+  WHERE status != 'cancelled';
+
+CREATE INDEX IF NOT EXISTS idx_agent_lookup
+  ON onboarding_states(agent_id);
+
+CREATE INDEX IF NOT EXISTS idx_expiration
+  ON onboarding_states(expires_at)
+  WHERE expires_at IS NOT NULL;
+
+-- Auto-update timestamp trigger
+CREATE TRIGGER IF NOT EXISTS update_updated_at
+  AFTER UPDATE ON onboarding_states
+  FOR EACH ROW
+BEGIN
+  UPDATE onboarding_states
+  SET updated_at = datetime('now')
+  WHERE id = NEW.id;
+END;
+```
+
+**Status Enum:**
+| Status | Description | Next States |
+|--------|-------------|-------------|
+| `new` | Initial state, agent created | `pending_welcome` |
+| `pending_welcome` | Welcome message queued | `collecting_info` |
+| `collecting_info` | Gathering name/email | `ready_for_handover`, `cancelled` |
+| `ready_for_handover` | Awaiting user message | `complete` |
+| `complete` | Handover done | `active` |
+| `active` | Normal operation | — (terminal) |
+| `cancelled` | User abandoned | — (terminal) |
+
+**Concurrency Strategy:**
+- `BEGIN IMMEDIATE` transactions + UNIQUE constraints
+- WAL mode allows concurrent readers
+- `busy_timeout = 5000ms` for retry on transient locks
+
+**State Expiration:**
+- New states expire in 24h: `expires_at = datetime('now', '+24 hours')`
+- Active states never expire: `expires_at = NULL`
+- Hourly cleanup cron: `DELETE FROM onboarding_states WHERE expires_at < datetime('now') AND status NOT IN ('active', 'complete')`
+
+**References:**
+- State transitions: ARCHITECTURE_REPORT.md section 6.2
+- Concurrency recommendation: Section 12.1 Decision Point 5 (A + D)
+
+---
+
+### 11.4 Additional Resolutions
+
+**DP4: OAuth-in-Sandbox** ✅ — OpenClaw `setupCommand` + `network: "bridge"` documented at [gateway/sandboxing.md:124-128]. v1 proved gog works; bug was timing.
+
+**DP5: Concurrency** ✅ — Covered in DP3 schema (WAL mode, UNIQUE constraints, 5s timeout).
+
+---
+
+### 11.5 Technical Spikes Status
+
+| Spike | Status | Success Criteria |
+|-------|--------|------------------|
+| **#1: OpenClaw Integration** | ⚪ Optional | CLI creates agent, binding, reload works (DP1 resolved) |
+| **#2: OAuth-in-Sandbox** | ✅ RESOLVED | OpenClaw docs validate `setupCommand` + `network:bridge` pattern |
+| **#3: Hook Contract** | ✅ Complete | `command:new` event viable (DP2 resolved) |
+
+**Spike #2 Resolution:** No spike needed. OpenClaw framework docs (296 indexed in `.openclaw-reference`) explicitly document:
+- Binary installation via `setupCommand` [gateway/sandboxing.md]
+- Network access via `network: "bridge"` [gateway/configuration.md]
+- Per-agent isolation via `env` + `binds` [multi-agent-sandbox-tools.md]
+
+---
+
+### 11.6 Definition of Done for Design Phase
+
+| Item | Status | Target |
+|------|--------|--------|
+| DP1: OpenClaw Integration | ✅ Resolved | CLI wrapper approach |
+| DP2: Hook vs. Webhook | ✅ Resolved | External webhook with command:new |
+| DP3: Database Schema | ✅ Resolved | Complete SQL with constraints |
+| DP4: OAuth-in-Sandbox | ✅ Resolved | OpenClaw `setupCommand` pattern documented |
+| DP5: Concurrency Strategy | ✅ Resolved | DB schema addresses this |
+| DP6: Error Handling Strategy | ✅ Resolved | Transactional pattern designed |
+| DP7: Security Decisions | ✅ RESOLVED | Shared token, no docker.sock, file-perms [gateway/security/index.md] |
+| Config Writer Service | ⚪ Pending | Implementation, not design |
+
+---
+
 ## Appendix A: OpenClaw Reference
 
 ### A.1 Documentation Links
+
+ALL Of this are in your QMD indexed database. Use `mcp__qmd__search` or `mcp__qmd__vsearch` on `.openclaw-reference` to investigate instead of using web search or curl.
 
 - Main docs: https://docs.openclaw.ai/
 - Multi-agent routing: https://docs.openclaw.ai/concepts/multi-agent
@@ -1014,24 +1178,414 @@ openclaw sandbox recreate <id>                # Recreate sandbox
 
 ---
 
-## Document Metadata
+## 12. Error Handling & Rollback Strategy
 
-| Property | Value |
-|----------|-------|
-| **Author** | AI (Claude) + User (juanpablodlc) |
-| **Date** | 2026-01-30 |
-| **Version** | 1.0 |
-| **Status** | Ready for implementation |
-| **Next Review** | After Phase 1 completion |
+**Status:** Design Complete - Implementation Pending
+**Date:** 2026-01-30
+**Priority:** HIGH - Blocks Implementation Phase
+
+### 12.1 Executive Summary
+
+The multi-step agent creation flow (CLI call → config update → gateway reload → database write) requires transactional safety. This section defines the error handling and rollback strategy for DonClaudioBot v2.
+
+**Key Principle:** Start with crashes (fail fast), add polish later.
+
+### 12.2 Failure Mode Catalog
+
+| # | Failure Point | Severity | Recovery Strategy |
+|---|---------------|----------|-------------------|
+| F1 | CLI call fails (OpenClaw not installed) | Critical | Abort - Return error to user |
+| F2 | Agent ID already exists | High | Idempotent Check - Return existing agent |
+| F3 | Config file locked | High | Retry with exponential backoff (1s, 2s, 5s) |
+| F4 | Config write fails (disk full) | Critical | Rollback - Delete agent, alert ops |
+| F5 | Config validation fails (invalid JSON) | Critical | Rollback - Delete agent, keep old config |
+| F6 | Gateway reload fails (not running) | High | Rollback - Remove from config, delete agent |
+| F7 | Gateway reload fails (invalid config) | Critical | Restore backup, delete agent |
+| F8 | Database write fails (disk full) | Critical | Rollback - Remove from config, delete agent |
+| F9 | Database UNIQUE violation (phone) | High | Idempotent - Return existing agent |
+| F10 | Database UNIQUE violation (agent_id) | High | Panic - Manual cleanup (impossible with UUIDs) |
+| F11 | Message before reload completes | Low | Accept - User's second message routes correctly |
+| F12 | Container crash mid-onboarding | High | Reconciliation - Cleanup job on restart |
+
+### 12.3 Transactional Creation Pattern
+
+```typescript
+async function createAgentTransactional(options: CreateAgentOptions): Promise<string> {
+  const { agentId, phoneNumber } = options;
+  let agentCreated = false;
+  let configUpdated = false;
+
+  try {
+    // Step 1: Create agent via CLI
+    await execAsync(`openclaw agents add ${agentId}`);
+    agentCreated = true;
+
+    // Step 2: Update config atomically
+    await updateConfigAtomic(agentId, phoneNumber);
+    configUpdated = true;
+
+    // Step 3: Reload gateway
+    await execAsync('openclaw gateway reload');
+
+    // Step 4: Write to database (last step - persistent)
+    await db.insert({ phone: phoneNumber, agentId, status: 'new' });
+
+    return agentId;
+  } catch (error) {
+    // ROLLBACK in reverse order of completion
+    if (configUpdated) await restoreConfigBackup();
+    if (agentCreated) await execAsync(`openclaw agents remove ${agentId}`);
+    throw error;
+  }
+}
+```
+
+### 12.4 Idempotency Strategy
+
+```typescript
+export async function createAgent(options: CreateAgentOptions): Promise<string> {
+  const { phoneNumber } = options;
+
+  // CHECK 1: Database takes precedence (source of truth)
+  const existing = await db.getByPhone(phoneNumber);
+  if (existing && existing.status !== 'cancelled') {
+    return existing.agent_id;  // Idempotent return
+  }
+
+  // CHECK 2: Validate phone format (E.164)
+  if (!phoneNumber.match(/^\+\d{10,15}$/)) {
+    throw new Error(`Invalid phone format: ${phoneNumber}`);
+  }
+
+  // PROCEED WITH CREATION (transactional)
+  return await createAgentTransactional(options);
+}
+```
+
+### 12.5 State Reconciliation
+
+Run reconciliation on **container startup** and **hourly cron**:
+
+```typescript
+interface ReconciliationReport {
+  orphanedAgents: string[];      // In config, not in DB
+  orphanedDbRecords: string[];   // In DB, not in config
+  invalidBindings: string[];     // Bindings to non-existent agents
+  staleStates: string[];          // States stuck > 24h in non-terminal
+}
+
+// Reconciliation actions:
+// - Orphaned agent: Delete agent directory, remove from config
+// - Orphaned DB record: Mark as 'cancelled', notify user
+// - Invalid binding: Remove binding from config
+// - Stale state: Mark as 'cancelled', create fresh on next message
+```
+
+### 12.6 Implementation Checklist
+
+**Minimum Viable (Week 1):**
+- [ ] Idempotency checks (database-first)
+- [ ] Error propagation (let errors crash, log stack traces)
+- [ ] Basic logging (log start/success/failure)
+- [ ] Manual rollback documentation
+
+**Essential (Week 2):**
+- [ ] Atomic config writes (temp file + rename)
+- [ ] Config backups (backup before every write)
+- [ ] Rollback function (performRollback implementation)
+- [ ] File locking (proper-lockfile for config)
+- [ ] Database locks (DB-level locking for phone operations)
+- [ ] Reconciliation job (hourly cleanup + state detection)
+
+**Production-Ready (Week 3+):**
+- [ ] Metrics (Prometheus/CloudWatch integration)
+- [ ] Alerting (PagerDuty/Slack alerts)
+- [ ] Cron cleanup (automated stale state removal)
+- [ ] Retry logic (exponential backoff)
+- [ ] Circuit breaker (stop onboardings if failure rate >10%)
+
+**References:**
+- Full strategy: `ERROR_HANDLING_STRATEGY.md`
+- Flow diagrams: `ERROR_HANDLING_FLOW.md`
+- Summary: `ERROR_HANDLING_SUMMARY.md`
 
 ---
 
-## Change Log
+## 13. Security Architecture
 
-| Date | Version | Changes | Author |
-|------|---------|---------|--------|
-| 2026-01-30 | 1.0 | Initial document | AI |
+**Status:** Pre-Implementation Audit Complete - Decisions Required
+**Date:** 2026-01-30
+**Severity:** CRITICAL - Multi-user system with OAuth tokens
+
+### 13.1 Executive Summary
+
+DonClaudioBot v2 requires strong security isolation. User A must NEVER access User B's data, tokens, or sessions. The architecture has sound foundational concepts (5-layer design), but critical security decisions must be made BEFORE implementation.
+
+### 13.2 Critical Security Decisions Required
+
+| Decision | Options | Recommendation | Deadline |
+|----------|---------|----------------|----------|
+| **Webhook auth** | Shared token vs HMAC | Shared token (Phase 1) | Week 1 |
+| **Docker socket** | Mount + monitoring vs DooD pattern | Mount + monitoring (Phase 1) | Week 1 |
+| **Token encryption** | File-based vs Vault | File-based (Phase 1) | Week 1 |
+| **Rate limiting** | Express middleware vs nginx | Express (Phase 1) | Week 1 |
+
+### 13.3 Webhook Security
+
+**Current State:** `POST /webhook/onboarding` is undefined. No authentication, no input validation, no rate limiting.
+
+#### Option A: Shared Secret Token (Recommended for MVP)
+
+```typescript
+const HOOK_TOKEN = process.env.HOOK_TOKEN;
+
+export function webhookAuth(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing authorization header' });
+  }
+  const token = authHeader.substring(7);
+  if (token !== HOOK_TOKEN) {
+    console.error(`[webhook] Failed auth attempt from ${req.ip}`);
+    return res.status(403).json({ error: 'Invalid token' });
+  }
+  next();
+}
+```
+
+#### Option B: HMAC Signature (Production-Grade)
+
+```typescript
+import crypto from 'crypto';
+
+const HOOK_SECRET = process.env.HOOK_SECRET;
+
+export function webhookSignature(req: Request, res: Response, next: NextFunction) {
+  const signature = req.headers['x-webhook-signature'] as string;
+  const timestamp = req.headers['x-webhook-timestamp'] as string;
+  const body = JSON.stringify(req.body);
+
+  // Replay protection (reject requests older than 5 minutes)
+  if (Math.abs(Date.now() - parseInt(timestamp)) > 5 * 60 * 1000) {
+    return res.status(401).json({ error: 'Request too old' });
+  }
+
+  const expected = crypto.createHmac('sha256', HOOK_SECRET)
+    .update(`${timestamp}.${body}`)
+    .digest('hex');
+
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return res.status(403).json({ error: 'Invalid signature' });
+  }
+
+  next();
+}
+```
+
+### 13.4 Input Validation
+
+**E.164 Phone Number Validation:**
+
+```typescript
+import { z } from 'zod';
+
+export const E164PhoneSchema = z.string().regex(
+  /^\+[1-9]\d{0,14}$/,
+  'Invalid E.164 phone number format (must be +15551234567)'
+);
+
+export const OnboardingWebhookSchema = z.object({
+  phone: E164PhoneSchema,
+  timestamp: z.string().optional(),
+});
+```
+
+**Agent ID Validation:**
+
+```typescript
+export const AgentIdSchema = z.string()
+  .min(5).max(64)
+  .regex(/^user_[a-zA-Z0-9_-]+$/, 'Invalid agent ID format');
+```
+
+**SQL Injection Prevention:**
+
+```typescript
+// ❌ WRONG - SQL injection vulnerable
+const query = `SELECT * FROM onboarding_states WHERE phone_number = '${phone}'`;
+
+// ✅ CORRECT - Parameterized
+const query = `SELECT * FROM onboarding_states WHERE phone_number = ?`;
+const result = db.prepare(query).get(phone);
+```
+
+### 13.5 Docker Socket Risk Mitigation
+
+**Current:** `/var/run/docker.sock` is mounted in container - CRITICAL SECURITY RISK
+
+**Phase 1 Mitigation (Accept Risk with Monitoring):**
+
+```yaml
+services:
+  don-claudio-bot:
+    user: '1000:1000'           # Run as non-root
+    cap_drop:
+      - ALL                     # Drop all capabilities
+    security_opt:
+      - seccomp:/root/seccomp-docker.json
+      - no-new-privileges:true
+    read_only: true              # Read-only root filesystem
+```
+
+**Phase 2 Mitigation (DooD Pattern):**
+- Remove socket mount entirely
+- Use Docker TCP with TLS certificates
+- Complete host isolation
+
+### 13.6 Sandbox Configuration Validation
+
+```typescript
+export function validateSandboxConfig(config: AgentConfig): void {
+  const { sandbox } = config;
+
+  // 1. Ensure privileged is false
+  if (sandbox.docker.privileged === true) {
+    throw new Error('CRITICAL: Privileged mode is NOT allowed');
+  }
+
+  // 2. Ensure capabilities are dropped
+  const capDrop = sandbox.docker.capDrop || ['ALL'];
+  if (!capDrop.includes('ALL')) {
+    throw new Error('CRITICAL: Must drop all capabilities');
+  }
+
+  // 3. Ensure no socket mounts
+  const binds = sandbox.docker.binds || [];
+  const socketMounts = binds.filter(b => b.includes('docker.sock'));
+  if (socketMounts.length > 0) {
+    throw new Error('CRITICAL: Docker socket mount in sandbox');
+  }
+
+  // 4. Ensure read-only workspace
+  if (sandbox.workspaceAccess !== 'ro' && sandbox.workspaceAccess !== 'none') {
+    throw new Error('CRITICAL: Workspace must be read-only or none');
+  }
+}
+```
+
+### 13.7 Token Storage Security
+
+**Password Generation:**
+
+```typescript
+import crypto from 'crypto';
+
+export function generateKeyringPassword(): string {
+  const randomBytes = crypto.randomBytes(32);  // 256 bits
+  const password = randomBytes.toString('base64url');
+  return `${password}.Key!`;  // ~50 characters
+}
+```
+
+**Encryption Strategy (Phase 1 - File-based):**
+
+```typescript
+const MASTER_KEY_PATH = '/root/.openclaw/.master-key';
+
+export async function encryptPassword(password: string): Promise<string> {
+  const key = await fs.readFile(MASTER_KEY_PATH);
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+  let encrypted = cipher.update(password, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag();
+
+  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+}
+```
+
+### 13.8 Runtime Validation
+
+**Startup Security Checks:**
+
+```typescript
+app.listen(3000, async () => {
+  console.log('Onboarding service started');
+
+  // CRITICAL: Validate security before accepting requests
+  const checks = [
+    validateSessionIsolation(),     // dmScope: "per-channel-peer"
+    validateBindingUniqueness(),     // No duplicate phone bindings
+    validateAgentIsolation(),        // No symlink attacks
+  ];
+
+  const results = await Promise.all(checks);
+
+  if (results.some(r => !r)) {
+    console.error('[CRITICAL] Security validation failed, shutting down');
+    process.exit(1);
+  }
+
+  console.log('[PASS] All security checks passed, accepting requests');
+});
+```
+
+### 13.9 Security Checklist (Pre-Production)
+
+**Critical (Must Complete Before ANY User Access):**
+- [ ] Webhook Authentication (HOOK_TOKEN middleware)
+- [ ] Input Validation (Zod schemas for phone, agent IDs)
+- [ ] SQL Injection Prevention (parameterized queries)
+- [ ] Session Isolation (dmScope: "per-channel-peer")
+- [ ] Binding Uniqueness (no duplicate phone bindings)
+- [ ] Docker Socket Mitigations (non-root, seccomp, monitoring)
+- [ ] Token Encryption (file-based encryption)
+- [ ] Password Generation (cryptographically secure)
+- [ ] File Permissions (700 on agent dirs, 600 on configs)
+- [ ] Audit Logging (all agent creations, token access, config changes)
+
+**High Priority (Before Public Launch):**
+- [ ] Rate Limiting (Express middleware for webhook)
+- [ ] Sandbox Validation (no privileged containers, dropped caps)
+- [ ] Workspace Symlink Checks (pre-start validation)
+- [ ] OAuth Token Rotation (90-day schedule)
+- [ ] Penetration Testing (10 test scenarios)
+- [ ] Incident Response (containment, rotation, audit procedures)
+- [ ] Backup Security (encrypt backups, test restore)
+- [ ] Log Redaction (redact tokens, passwords from logs)
+- [ ] Config File Validation (pre-deployment checks)
+- [ ] Network Isolation (firewall rules, VPN for admin)
+
+**References:**
+- Full security review: `SECURITY_REVIEW.md`
+- v1 red team findings: `DeepDive.md:387-403`
 
 ---
 
-*End of Report*
+## 14. Updated Decision Points Status
+
+| Decision Point | Status | Resolution |
+|----------------|--------|------------|
+| **DP1: OpenClaw Integration** | ✅ Resolved | CLI wrapper approach |
+| **DP2: Hook vs. Webhook** | ✅ Resolved | External webhook with `command:new` hook |
+| **DP3: Database Schema** | ✅ Resolved | Complete SQL with constraints |
+| **DP4: OAuth-in-Sandbox** | ✅ Resolved | OpenClaw docs validate `setupCommand` + `network:bridge` |
+| **DP5: Concurrency Strategy** | ✅ Resolved | DB locking + UNIQUE constraints |
+| **DP6: Error Handling** | ✅ Resolved | Transactional pattern with rollback |
+| **DP7: Security Decisions** | ✅ Resolved | Shared token, no docker.sock, file-perms only |
+
+**Definition of Done - Updated:**
+
+| Item | Status | Target |
+|------|--------|--------|
+| DP1-DP7 | ✅ Resolved | Complete designs available |
+| Config Writer Implementation | ⚪ Pending | Implementation phase |
+| Error Handling Implementation | ⚪ Pending | Implementation phase |
+| Security Implementation | ⚪ Pending | Implementation phase |
+
+**Completion Criteria:** All design decisions resolved; ready for implementation task breakdown.
+
+---
+
+*End of ARCHITECTURE_REPORT.md*

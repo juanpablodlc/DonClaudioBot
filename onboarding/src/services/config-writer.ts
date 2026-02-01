@@ -1,7 +1,7 @@
 // Config Writer Service
 // Atomic openclaw.json updates with file locking
 
-import { readFileSync, writeFileSync, renameSync, copyFileSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, copyFileSync, constants as fsConstants } from 'fs';
 import { dirname } from 'path';
 import lockfile from 'proper-lockfile';
 import JSON5 from 'json5';
@@ -72,7 +72,7 @@ export async function backupConfig(): Promise<string> {
   });
 
   try {
-    copyFileSync(path, backupPath, 0x1000); // COPYFILE_EXCL
+    copyFileSync(path, backupPath, fsConstants.COPYFILE_EXCL);
   } finally {
     await release();
   }

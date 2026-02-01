@@ -1,13 +1,13 @@
 // Agent Creator Service
 // Wrapper around OpenClaw CLI for dynamic agent creation with transactional rollback
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomBytes } from 'crypto';
 import { E164PhoneSchema } from '../lib/validation.js';
 import type { AgentConfig as ConfigWriterAgentConfig } from './config-writer.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // CLI timeout: 30 seconds
 const CLI_TIMEOUT = 30000;
@@ -39,7 +39,7 @@ export interface AgentConfig {
  */
 async function verifyOpenClawInstalled(): Promise<void> {
   try {
-    await execAsync('openclaw --version', { timeout: 5000 });
+    await execFileAsync('openclaw', ['--version'], { timeout: 5000 });
   } catch {
     throw new Error('OpenClaw CLI not found. Install with: npm install -g openclaw');
   }
@@ -67,8 +67,8 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
   let backupPath: string | null = null;
 
   try {
-    // Step 1: Create agent via CLI
-    await execAsync(`openclaw agents add ${agentId}`, { timeout: CLI_TIMEOUT });
+    // Step 1: Create agent via CLI (using execFile to prevent command injection)
+    await execFileAsync('openclaw', ['agents', 'add', agentId], { timeout: CLI_TIMEOUT });
     agentCreated = true;
 
     // Step 2: Backup config
@@ -100,8 +100,8 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
     await addAgentToConfig(agentConfig as unknown as ConfigWriterAgentConfig, phoneNumber);
     configUpdated = true;
 
-    // Step 4: Reload gateway
-    await execAsync('openclaw gateway reload', { timeout: CLI_TIMEOUT });
+    // Step 4: Reload gateway (using execFile to prevent command injection)
+    await execFileAsync('openclaw', ['gateway', 'reload'], { timeout: CLI_TIMEOUT });
 
     return agentId;
   } catch (error) {
@@ -117,7 +117,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
 
     if (agentCreated) {
       try {
-        await execAsync(`openclaw agents remove ${agentId}`, { timeout: CLI_TIMEOUT });
+        await execFileAsync('openclaw', ['agents', 'remove', agentId], { timeout: CLI_TIMEOUT });
       } catch (removeError) {
         console.error(`[agent-creator] Failed to remove agent ${agentId}:`, removeError);
       }

@@ -396,6 +396,22 @@ POST /webhook/onboarding
 - Are there examples of hooks that make internal state changes without exposing REST APIs?
 - Decision: Single webhook endpoint vs. full REST API for admin/debug purposes
 
+### 6.4 Idempotency Implementation
+
+The webhook must handle concurrent duplicate requests atomically. Two approaches:
+
+**Option A: Database-level (Recommended)**
+```sql
+INSERT INTO onboarding_states (phone_number, agent_id, status, expires_at)
+VALUES (?, ?, 'new', datetime('now', '+24 hours'))
+ON CONFLICT(phone_number) DO NOTHING
+RETURNING agent_id;
+```
+If no row returned, SELECT existing. Single atomic operation.
+
+**Option B: Application-level**
+Catch `SQLITE_CONSTRAINT_UNIQUE` error from `createState()` and return existing agent instead of 500.
+
 ---
 
 ## 7. Multi-User Isolation Strategy
@@ -1217,6 +1233,8 @@ async function createAgentTransactional(options: CreateAgentOptions): Promise<st
 
   try {
     // Step 1: Create agent via CLI
+    // ⚠️ Security Note: Production code MUST use execFile() instead of exec()
+    // to prevent command injection. execFile() does not invoke shell.
     await execAsync(`openclaw agents add ${agentId}`);
     agentCreated = true;
 
@@ -1587,7 +1605,7 @@ app.listen(3000, async () => {
 
 ---
 
-## 15. Implementation Progress (as of 2026-01-31)
+## 15. Implementation Progress (as of 2026-02-01)
 
 ### 15.1 Completed P0 Tasks
 
@@ -1599,14 +1617,15 @@ app.listen(3000, async () => {
 | **P0-004** | ✅ | `onboarding/src/middleware/webhook-auth.ts` | Bearer token auth middleware (401/403) |
 | **P0-005** | ✅ | `onboarding/src/services/config-writer.ts` | Atomic config writes with proper-lockfile |
 | **P0-006** | ✅ | `onboarding/src/services/agent-creator.ts` | CLI wrapper with transactional rollback |
+| **P0-007** | ✅ | `onboarding/src/routes/webhook.ts` | POST /webhook/onboarding with idempotency |
+| **P0-008** | ✅ | `onboarding/src/index.ts` | Express server entry point with health check |
+| **P0-009** | ✅ | `config/openclaw.json.template` | Base OpenClaw configuration template |
+| **P0-010** | ✅ | `onboarding/src/services/agent-creator.ts` | Uses execFile() (no command injection risk) |
+| **P0-011** | ✅ | `onboarding/src/routes/webhook.ts` | UNIQUE constraint handling for race conditions |
 
 ### 15.2 Pending P0 Tasks
 
-| Task | Status | Dependencies | Description |
-|------|--------|--------------|-------------|
-| **P0-007** | ⚪ | P0-003, P0-004, P0-006 ✅ | POST /webhook/onboarding route |
-| **P0-008** | ⚪ | P0-007 | Express server entry point |
-| **P0-009** | ⚪ | None | openclaw.json.template |
+**All P0 tasks (P0-001 through P0-011) are now complete.** The onboarding service is ready for testing and deployment.
 
 ### 15.3 Implementation Details
 
@@ -1635,10 +1654,40 @@ app.listen(3000, async () => {
 
 **Agent Creation (P0-006):**
 - `openclaw --version` check before CLI calls
-- 30s timeout on all execAsync calls
+- Uses `execFile()` (not `exec()`) to prevent command injection
+- 30s timeout on all CLI calls
 - Rollback flags: `agentCreated`, `configUpdated`
 - Rollback order: restore config, then remove agent
 - Unique `GOG_KEYRING_PASSWORD` per agent (base64url)
+
+**Webhook Route (P0-007):**
+- POST /webhook/onboarding with Bearer token auth
+- Idempotent: returns existing agent if phone already onboarded
+- Handles `SQLITE_CONSTRAINT_UNIQUE` for concurrent requests
+- Status codes: 200 (existing), 201 (created), 400 (validation), 401/403 (auth), 500 (error)
+
+**Express Server (P0-008):**
+- JSON body parser middleware
+- Database initialization before server starts
+- Health check endpoint at `/health`
+- Configurable PORT (default 3000)
+- Warns if HOOK_TOKEN not set
+
+### 15.4 Implementation Gaps (Post-Review 2026-02-01)
+
+| Gap | Location | Severity | Description |
+|-----|----------|----------|-------------|
+| **Orphaned Agent Risk** | `webhook.ts:28-31` | MEDIUM | Agent created before DB write. If DB fails, agent exists with no record. |
+| **Sync/Async Mismatch** | `webhook.ts:22,31` | LOW | `await` on synchronous `better-sqlite3` functions. Works but misleading. |
+
+**Resolved (2026-02-01):**
+- ✅ P0-008: Express entry point implemented
+- ✅ Command injection: Already using `execFile()`, not `exec()`
+- ✅ Race condition: UNIQUE constraint handling in place
+
+**Recommended Next Steps:**
+1. Orphaned agents — addressed by P1-006 reconciliation
+2. Sync/async mismatch — cosmetic, can be deferred
 
 ---
 

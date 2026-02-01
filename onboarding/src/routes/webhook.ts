@@ -19,7 +19,8 @@ router.post('/webhook/onboarding', webhookAuth, async (req, res) => {
     console.log('[webhook] Processing onboarding for phone: ' + phone);
 
     // Step 2: Check if already onboarded (idempotent)
-    const existing = await getState(phone);
+    // Note: getState is synchronous (better-sqlite3)
+    const existing = getState(phone);
     if (existing && existing.status !== 'cancelled') {
       return res.status(200).json({ status: 'existing', agentId: existing.agent_id });
     }
@@ -27,8 +28,26 @@ router.post('/webhook/onboarding', webhookAuth, async (req, res) => {
     // Step 3: Create agent
     const agentId = await createAgent({ phoneNumber: phone });
 
-    // Step 4: Store state
-    await createState(phone, agentId, 'new');
+    // Step 4: Store state (with race condition handling)
+    try {
+      createState(phone, agentId, 'new');
+    } catch (dbError: unknown) {
+      // Handle race condition: concurrent request already created state
+      // better-sqlite3 throws SqliteError with code property
+      if (
+        dbError &&
+        typeof dbError === 'object' &&
+        'code' in dbError &&
+        (dbError as { code: string }).code === 'SQLITE_CONSTRAINT_UNIQUE'
+      ) {
+        console.log('[webhook] Concurrent request detected for phone: ' + phone);
+        const existingState = getState(phone);
+        if (existingState) {
+          return res.status(200).json({ status: 'existing', agentId: existingState.agent_id });
+        }
+      }
+      throw dbError;
+    }
 
     // Step 5: Return success
     return res.status(201).json({ status: 'created', agentId, phone });

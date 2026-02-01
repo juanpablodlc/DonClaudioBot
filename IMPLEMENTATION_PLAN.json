@@ -44,7 +44,9 @@
       "Added qmd_verification_2026_01_31 with OpenClaw documentation verification results",
       "Enhanced P0-006 with CLI existence check, explicit agentConfig schema, and command timeouts",
       "Updated P1-003 with specific QMD findings about message:received being unimplemented",
-      "Added implementation_guidance section with cross-cutting concerns"
+      "Added implementation_guidance section with cross-cutting concerns",
+      "Fixed better-sqlite3 version for Node.js v24 compatibility (^9.0.0 → ^12.6.2)",
+      "Created onboarding/package.json to match ARCHITECTURE_REPORT.md specification"
     ]
   },
   "implementation_guidance": {
@@ -62,7 +64,7 @@
     {
       "id": "P0-001",
       "title": "Create Zod validation schemas for E.164 phone and agent ID",
-      "status": "pending",
+      "status": "completed",
       "priority": "P0",
       "dependencies": [],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/lib/validation.ts with Zod schemas: (1) E164PhoneSchema - regex /^\\+[1-9]\\d{1,14}$/ for E.164 format (ITU-T E.164 standard), (2) AgentIdSchema - regex /^user_[a-zA-Z0-9_-]+$/, min 5 max 64 chars, (3) OnboardingWebhookSchema - object with phone (E164PhoneSchema) and optional timestamp. Export both schemas and infer TypeScript types using z.infer<>.",
@@ -83,22 +85,27 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "grep -q 'export.*E164PhoneSchema' src/lib/validation.ts && grep -q 'export.*AgentIdSchema' src/lib/validation.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "grep -q 'z.infer' src/lib/validation.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-01-31",
+      "comments": "File created at onboarding/src/lib/validation.ts. All exports verified: E164PhoneSchema, AgentIdSchema, OnboardingWebhookSchema with inferred TypeScript types."
     },
     {
       "id": "P0-002",
       "title": "Implement SQLite database schema with migrations",
-      "status": "pending",
+      "status": "completed",
       "priority": "P0",
       "dependencies": [],
       "description": "Replace placeholder /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/db/schema.sql with complete schema from ARCHITECTURE_REPORT.md. Include: (1) PRAGMA journal_mode=WAL, foreign_keys=ON, busy_timeout=5000, (2) onboarding_states table with phone_number TEXT NOT NULL UNIQUE, agent_id TEXT NOT NULL UNIQUE, status TEXT DEFAULT 'new', name, email, created_at, updated_at, expires_at, CHECK(phone_number LIKE '+%'), (3) state_transitions table for audit trail with phone_number, from_status, to_status, transitioned_at, (4) Indexes: idx_phone_lookup (WHERE status != 'cancelled'), idx_agent_lookup, idx_expiration, (5) Trigger update_updated_at for auto-timestamp.",
@@ -120,22 +127,27 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'PRAGMA journal_mode = WAL' src/db/schema.sql && grep -q 'phone_number TEXT NOT NULL UNIQUE' src/db/schema.sql",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'idx_phone_lookup' src/db/schema.sql && grep -q 'idx_agent_lookup' src/db/schema.sql",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'CHECK(phone_number LIKE' src/db/schema.sql",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-01-31",
+      "comments": "Schema replaced with complete DDL from ARCHITECTURE_REPORT.md section 11.3. Includes onboarding_states table, state_transitions audit trail, 3 indexes, auto-update trigger, and PRAGMA settings for WAL mode, foreign keys, and 5s timeout."
     },
     {
       "id": "P0-003",
       "title": "Implement state-manager with SQLite CRUD operations",
-      "status": "pending",
+      "status": "completed",
       "priority": "P0",
       "dependencies": ["P0-002"],
       "description": "Implement /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/state-manager.ts replacing placeholder. Import Database from 'better-sqlite3'. Define OnboardingState interface matching schema. Implement: (1) initDatabase() - opens ~/.openclaw/onboarding.db with {timeout: 5000}, reads and executes schema.sql, (2) getState(phone) - returns row or null using prepared statement 'SELECT * FROM onboarding_states WHERE phone_number = ?', (3) createState(phone, agentId, status='new') - INSERT with expires_at = datetime('now', '+24 hours'), (4) updateState(phone, updates) - UPDATE with partial fields, (5) setStatus(phone, status) - transition with audit log entry to state_transitions, (6) getByAgentId(agentId) - lookup by agent. All queries parameterized, no string interpolation.",
@@ -159,26 +171,32 @@
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
           "expected_output": "exit code 0",
-          "note": "TypeScript compilation check - run after every file change"
+          "note": "TypeScript compilation check - run after every file change",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'prepare(' src/services/state-manager.ts && ! grep -q \"SELECT.*phone_number = '\\${\" src/services/state-manager.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'better-sqlite3' src/services/state-manager.ts && grep -q 'Database(' src/services/state-manager.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'transaction(' src/services/state-manager.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-01-31",
+      "comments": "Replaced placeholder with full CRUD implementation. All functions use sync better-sqlite3 API with prepared statements. getState returns null when not found (no throw). createState and setStatus use transactions for atomicity. Added closeDatabase() for cleanup."
     },
     {
       "id": "P0-004",
       "title": "Implement webhook authentication middleware",
-      "status": "pending",
+      "status": "completed",
       "priority": "P0",
       "dependencies": [],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/middleware/webhook-auth.ts implementing shared token auth (DP7 security decision). Export webhookAuth(req, res, next) function that: (1) Checks req.headers.authorization exists and starts with 'Bearer ', (2) Extracts token via authHeader.substring(7), (3) Compares to process.env.HOOK_TOKEN using ===, (4) Returns res.status(401).json({error: 'Missing authorization header'}) if missing, (5) Returns res.status(403).json({error: 'Invalid token'}) if invalid, (6) Logs console.error('[webhook] Failed auth attempt from ' + req.ip) for failures, (7) Calls next() on success. Import Request, Response, NextFunction from 'express'.",
@@ -201,26 +219,32 @@
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
           "expected_output": "exit code 0",
-          "note": "TypeScript compilation check - run after every file change"
+          "note": "TypeScript compilation check - run after every file change",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q \"req.headers.authorization\" src/middleware/webhook-auth.ts && grep -q \"status(401)\" src/middleware/webhook-auth.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q \"status(403)\" src/middleware/webhook-auth.ts && grep -q \"HOOK_TOKEN\" src/middleware/webhook-auth.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q \"Failed auth attempt\" src/middleware/webhook-auth.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-01-31",
+      "comments": "Middleware created with proper TypeScript types from express. Returns 401 for missing header, 403 for invalid token. Uses authHeader?.startsWith('Bearer ') for safe undefined handling. Does not log token value (security). Calls next() on success."
     },
     {
       "id": "P0-005",
       "title": "Implement atomic config-writer service",
-      "status": "pending",
+      "status": "completed",
       "priority": "P0",
       "dependencies": [],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/config-writer.ts for atomic openclaw.json updates (DP1 resolution). Implement: (1) getConfigPath() - returns process.env.OPENCLAW_CONFIG_PATH or '~/.openclaw/openclaw.json', (2) readConfig() - reads file, parses with JSON5.parse, returns object, (3) writeConfigAtomic(config) - writes to './openclaw.json.tmp_' + Date.now(), then fs.rename() for atomicity, (4) addAgentToConfig(agentConfig, phoneNumber) - adds agent to agents.list array and binding {agentId, match: {channel: 'whatsapp', peer: {kind: 'dm', id: phoneNumber}}} to bindings array, (5) backupConfig() - copies to './openclaw.json.backup_' + Date.now(), (6) restoreBackup(backupPath) - moves backup to config. Use proper-lockfile with {retries: 3, minTimeout: 100, stale: 5000} on config file during writes.",
@@ -244,21 +268,27 @@
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
           "expected_output": "exit code 0",
-          "note": "TypeScript compilation check - run after every file change"
+          "note": "TypeScript compilation check - run after every file change",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'proper-lockfile' src/services/config-writer.ts && grep -q 'rename' src/services/config-writer.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'JSON5' src/services/config-writer.ts && grep -q 'tmp_' src/services/config-writer.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'backup_' src/services/config-writer.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-01-31",
+      "comments": "Config writer service with proper-lockfile for concurrent write safety. Uses JSON5.parse() for comments/trailing commas support. Atomic writes via temp file + rename. addAgentToConfig() adds agent to list and creates binding. backupConfig() uses fs.copyFileSync with COPYFILE_EXCL flag. Removed minTimeout from lock options (not supported by proper-lockfile types). TypeScript interfaces defined for OpenClawConfig, AgentConfig, Binding."
     },
     {
       "id": "P0-006",

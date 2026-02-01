@@ -1,54 +1,145 @@
 // State Manager Service
 // SQLite database operations for onboarding state
 
-interface OnboardingState {
+import Database from 'better-sqlite3';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// DB path: ~/.openclaw/onboarding.db or env override
+const DB_PATH = process.env.OPENCLAW_STATE_DIR
+  ? `${process.env.OPENCLAW_STATE_DIR}/onboarding.db`
+  : `${process.env.HOME || '~'}/.openclaw/onboarding.db`;
+
+let db: Database.Database | null = null;
+
+// Onboarding state interface matching schema
+export interface OnboardingState {
+  id: number;
   phone_number: string;
   agent_id: string;
-  status: 'pending' | 'welcome_sent' | 'collecting_info' | 'ready_for_handover' | 'complete' | 'active';
+  status: string;
   name?: string;
   email?: string;
   created_at: string;
   updated_at: string;
+  expires_at?: string;
 }
 
 /**
  * Initialize SQLite database
- * TODO: Implement with better-sqlite3
+ * Opens ~/.openclaw/onboarding.db and executes schema.sql
  */
 export function initDatabase(): void {
-  throw new Error('Not implemented');
+  db = new Database(DB_PATH, { timeout: 5000 });
+
+  // Read and execute schema
+  const schemaPath = join(__dirname, '../db/schema.sql');
+  const schema = readFileSync(schemaPath, 'utf-8');
+  db.exec(schema);
 }
 
 /**
  * Get onboarding state by phone number
+ * Returns null if not found
  */
-export async function getState(phone: string): Promise<OnboardingState | null> {
-  throw new Error('Not implemented');
+export function getState(phone: string): OnboardingState | null {
+  if (!db) initDatabase();
+  const stmt = db!.prepare('SELECT * FROM onboarding_states WHERE phone_number = ?');
+  return stmt.get(phone) as OnboardingState | null;
 }
 
 /**
- * Create new onboarding record
+ * Create new onboarding record with 24h expiration
  */
-export async function createState(phone: string, agentId: string): Promise<void> {
-  throw new Error('Not implemented');
+export function createState(phone: string, agentId: string, status: string = 'new'): void {
+  if (!db) initDatabase();
+
+  const insertStmt = db!.transaction(() => {
+    const stmt = db!.prepare(
+      'INSERT INTO onboarding_states (phone_number, agent_id, status, expires_at) VALUES (?, ?, ?, datetime("now", "+24 hours"))'
+    );
+    stmt.run(phone, agentId, status);
+  });
+
+  insertStmt();
 }
 
 /**
- * Update onboarding state
+ * Update onboarding state with partial fields
  */
-export async function updateState(
-  phone: string,
-  updates: Partial<Omit<OnboardingState, 'phone_number' | 'agent_id' | 'created_at'>>
-): Promise<void> {
-  throw new Error('Not implemented');
+export function updateState(phone: string, updates: Partial<Omit<OnboardingState, 'id' | 'phone_number' | 'agent_id' | 'created_at'>>): void {
+  if (!db) initDatabase();
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (updates.status !== undefined) {
+    fields.push('status = ?');
+    values.push(updates.status);
+  }
+  if (updates.name !== undefined) {
+    fields.push('name = ?');
+    values.push(updates.name);
+  }
+  if (updates.email !== undefined) {
+    fields.push('email = ?');
+    values.push(updates.email);
+  }
+  if (updates.expires_at !== undefined) {
+    fields.push('expires_at = ?');
+    values.push(updates.expires_at);
+  }
+
+  if (fields.length === 0) return;
+
+  values.push(phone);
+  const stmt = db!.prepare(`UPDATE onboarding_states SET ${fields.join(', ')} WHERE phone_number = ?`);
+  stmt.run(...values);
 }
 
 /**
- * Set onboarding status
+ * Set onboarding status with audit trail entry
  */
-export async function setStatus(
-  phone: string,
-  status: OnboardingState['status']
-): Promise<void> {
-  throw new Error('Not implemented');
+export function setStatus(phone: string, status: string): void {
+  if (!db) initDatabase();
+
+  const current = getState(phone);
+  const fromStatus = current?.status || null;
+
+  const setStmt = db!.transaction(() => {
+    // Update main state
+    const updateStmt = db!.prepare('UPDATE onboarding_states SET status = ? WHERE phone_number = ?');
+    updateStmt.run(status, phone);
+
+    // Log transition
+    const logStmt = db!.prepare(
+      'INSERT INTO state_transitions (phone_number, from_status, to_status) VALUES (?, ?, ?)'
+    );
+    logStmt.run(phone, fromStatus, status);
+  });
+
+  setStmt();
+}
+
+/**
+ * Get onboarding state by agent ID
+ */
+export function getByAgentId(agentId: string): OnboardingState | null {
+  if (!db) initDatabase();
+  const stmt = db!.prepare('SELECT * FROM onboarding_states WHERE agent_id = ?');
+  return stmt.get(agentId) as OnboardingState | null;
+}
+
+/**
+ * Close database connection (for cleanup/shutdown)
+ */
+export function closeDatabase(): void {
+  if (db) {
+    db.close();
+    db = null;
+  }
 }

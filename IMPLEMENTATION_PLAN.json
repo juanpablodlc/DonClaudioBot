@@ -293,7 +293,7 @@
     {
       "id": "P0-006",
       "title": "Implement agent-creator CLI wrapper with transactional rollback",
-      "status": "pending",
+      "status": "completed",
       "priority": "P0",
       "dependencies": ["P0-001", "P0-005"],
       "description": "Implement /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/agent-creator.ts with createAgent() and agentExists(). Import {exec} from 'child_process' and promisify. Implement createAgent(options) with BUILT-IN ROLLBACK: (1) Validate phone via E164PhoneSchema.parse(options.phoneNumber), (2) Generate agentId = 'user_' + randomBytes(8).toString('hex'), (3) Track state: let agentCreated = false, let configUpdated = false, let backupPath = null, (4) In try block: run 'openclaw agents add ' + agentId, set agentCreated = true, (5) backupPath = await backupConfig(), (6) Build agentConfig and call addAgentToConfig(agentConfig, options.phoneNumber), set configUpdated = true, (7) Run 'openclaw gateway reload', (8) Return agentId. In catch block: if (configUpdated && backupPath) await restoreBackup(backupPath), if (agentCreated) await execAsync('openclaw agents remove ' + agentId), then re-throw error. Implement agentExists(agentId): readConfig(), check agents.list.find(a => a.id === agentId).",
@@ -346,30 +346,38 @@
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
           "expected_output": "exit code 0",
-          "note": "TypeScript compilation check - run after every file change"
+          "note": "TypeScript compilation check - run after every file change",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'openclaw agents add' src/services/agent-creator.ts && grep -q 'openclaw gateway reload' src/services/agent-creator.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'randomBytes' src/services/agent-creator.ts && grep -q 'GOG_KEYRING_PASSWORD' src/services/agent-creator.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'agentCreated' src/services/agent-creator.ts && grep -q 'configUpdated' src/services/agent-creator.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'openclaw agents remove' src/services/agent-creator.ts && grep -q 'restoreBackup' src/services/agent-creator.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'openclaw --version' src/services/agent-creator.ts",
           "expected_output": "exit code 0",
-          "note": "Verify CLI existence check is implemented"
+          "note": "Verify CLI existence check is implemented",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-01-31",
+      "comments": "Replaced placeholder with full transactional agent creation. verifyOpenClawInstalled() checks 'openclaw --version' before any CLI calls. createAgent() validates phone with E164PhoneSchema, generates unique agentId (user_<16hex>) and GOG_KEYRING_PASSWORD, tracks rollback flags (agentCreated, configUpdated), and implements rollback in reverse order on failure. Also implemented agentExists() and getAgentByPhone() helpers. All CLI calls use 30s timeout."
     },
     {
       "id": "P0-007",

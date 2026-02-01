@@ -516,7 +516,7 @@ Each user's Google OAuth tokens are stored in their agent's auth directory:
 {
   "dependencies": {
     "express": "^4.19.0",
-    "better-sqlite3": "^9.0.0",
+    "better-sqlite3": "^12.6.2",
     "zod": "^3.22.0",
     "uuid": "^9.0.0"
   }
@@ -1580,11 +1580,65 @@ app.listen(3000, async () => {
 | Item | Status | Target |
 |------|--------|--------|
 | DP1-DP7 | ✅ Resolved | Complete designs available |
-| Config Writer Implementation | ⚪ Pending | Implementation phase |
-| Error Handling Implementation | ⚪ Pending | Implementation phase |
-| Security Implementation | ⚪ Pending | Implementation phase |
+| P0 Foundation Tasks | ✅ Complete | 6 of 9 P0 tasks implemented |
+| P0 Webhook & Server | ⚪ Pending | Remaining 3 P0 tasks |
 
-**Completion Criteria:** All design decisions resolved; ready for implementation task breakdown.
+**Completion Criteria:** All design decisions resolved; P0 foundation implementation complete.
+
+---
+
+## 15. Implementation Progress (as of 2026-01-31)
+
+### 15.1 Completed P0 Tasks
+
+| Task | Status | File | Description |
+|------|--------|------|-------------|
+| **P0-001** | ✅ | `onboarding/src/lib/validation.ts` | Zod schemas: E164Phone, AgentId, OnboardingWebhook |
+| **P0-002** | ✅ | `onboarding/src/db/schema.sql` | SQLite schema with WAL, FK constraints, audit trail |
+| **P0-003** | ✅ | `onboarding/src/services/state-manager.ts` | CRUD operations with prepared statements |
+| **P0-004** | ✅ | `onboarding/src/middleware/webhook-auth.ts` | Bearer token auth middleware (401/403) |
+| **P0-005** | ✅ | `onboarding/src/services/config-writer.ts` | Atomic config writes with proper-lockfile |
+| **P0-006** | ✅ | `onboarding/src/services/agent-creator.ts` | CLI wrapper with transactional rollback |
+
+### 15.2 Pending P0 Tasks
+
+| Task | Status | Dependencies | Description |
+|------|--------|--------------|-------------|
+| **P0-007** | ⚪ | P0-003, P0-004, P0-006 ✅ | POST /webhook/onboarding route |
+| **P0-008** | ⚪ | P0-007 | Express server entry point |
+| **P0-009** | ⚪ | None | openclaw.json.template |
+
+### 15.3 Implementation Details
+
+**Validation (P0-001):**
+- E.164 phone regex: `/^\+[1-9]\d{1,14}$/`
+- Agent ID format: `user_[a-zA-Z0-9_-]+` (5-64 chars)
+- TypeScript types via `z.infer<>`
+
+**Database (P0-002, P0-003):**
+- WAL mode for concurrent readers
+- UNIQUE constraints on phone_number, agent_id
+- Partial index: `WHERE status != 'cancelled'`
+- Auto-update trigger on `updated_at`
+- All queries use prepared statements (no SQL injection)
+
+**Security (P0-004):**
+- Bearer token validation via `HOOK_TOKEN` env var
+- Returns 401 for missing header, 403 for invalid token
+- Logs failures without exposing token
+
+**Config Management (P0-005):**
+- JSON5 parsing (comments/trailing commas supported)
+- Atomic writes: temp file + POSIX rename
+- proper-lockfile with retries: 3, stale: 5000ms
+- Backup/restore for rollback
+
+**Agent Creation (P0-006):**
+- `openclaw --version` check before CLI calls
+- 30s timeout on all execAsync calls
+- Rollback flags: `agentCreated`, `configUpdated`
+- Rollback order: restore config, then remove agent
+- Unique `GOG_KEYRING_PASSWORD` per agent (base64url)
 
 ---
 

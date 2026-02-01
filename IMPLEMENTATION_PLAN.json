@@ -382,7 +382,7 @@
     {
       "id": "P0-007",
       "title": "Implement webhook route POST /webhook/onboarding",
-      "status": "pending",
+      "status": "completed",
       "priority": "P0",
       "dependencies": ["P0-003", "P0-004", "P0-006"],
       "description": "Implement /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/routes/webhook.ts. Import express, {Router, Request, Response}, webhookAuth, OnboardingWebhookSchema, getState, createAgent, createState. Export router = Router(). POST /webhook/onboarding with webhookAuth middleware. Handler: (1) Try const {phone} = OnboardingWebhookSchema.parse(req.body), catch ZodError return res.status(400).json({error: 'Invalid phone format', details: error.errors}), (2) const existing = await getState(phone); if (existing && existing.status !== 'cancelled') return res.status(200).json({status: 'existing', agentId: existing.agent_id}), (3) const agentId = await createAgent({phoneNumber: phone}), (4) await createState(phone, agentId, 'new'), (5) return res.status(201).json({status: 'created', agentId, phone}). Catch errors return res.status(500).json({error: error.message}).",
@@ -406,17 +406,22 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q \"router.post('/webhook/onboarding'\" src/routes/webhook.ts && grep -q 'webhookAuth' src/routes/webhook.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'OnboardingWebhookSchema' src/routes/webhook.ts && grep -q 'createAgent' src/routes/webhook.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'ZodError' src/routes/webhook.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-01-31",
+      "comments": "Webhook route implemented with express.Router(). POST /webhook/onboarding uses webhookAuth middleware for security. Validates phone with OnboardingWebhookSchema.parse(), returns 400 for ZodError. Checks existing state for idempotency (returns 200 with existing agentId). Calls createAgent() then createState(). Returns 201 with agentId for new onboarding. Includes logging per constraints. Status codes: 200 (existing), 201 (created), 400 (validation), 401/403 (auth), 500 (server error)."
     },
     {
       "id": "P0-008",

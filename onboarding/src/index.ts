@@ -4,6 +4,7 @@
 import express from 'express';
 import { initDatabase } from './services/state-manager.js';
 import { router as webhookRouter } from './routes/webhook.js';
+import { startBaileysSidecar } from './services/baileys-sidecar.js';
 
 const app = express();
 
@@ -27,6 +28,18 @@ const PORT = process.env.PORT || 3000;
 // Security check: warn if HOOK_TOKEN not set
 if (!process.env.HOOK_TOKEN) {
   console.warn('[WARN] HOOK_TOKEN not set - webhook endpoint is insecure!');
+}
+
+// Start Baileys sidecar if enabled
+if (process.env.BAILEYS_SIDECAR_ENABLED === 'true') {
+  console.log('[baileys-sidecar] Starting sidecar service...');
+  try {
+    startBaileysSidecar();
+  } catch (error) {
+    console.error('[baileys-sidecar] Failed to start:', error);
+  }
+} else {
+  console.log('[baileys-sidecar] Disabled (set BAILEYS_SIDECAR_ENABLED=true to enable)');
 }
 
 // Start server

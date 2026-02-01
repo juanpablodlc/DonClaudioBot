@@ -1691,4 +1691,52 @@ app.listen(3000, async () => {
 
 ---
 
+### 15.5 Completed P1 Tasks (as of 2026-02-01)
+
+| Task | Status | File | Description |
+|------|--------|------|-------------|
+| **P1-001** | ✅ | `onboarding/src/lib/phone-normalizer.ts` | E.164 phone normalization (27 LOC) |
+| **P1-002** | ✅ | `onboarding/src/routes/state.ts` | State management endpoints (58 LOC) |
+| **P1-003** | ✅ | `docs/ONBOARDING_TRIGGER.md` | Trigger mechanism investigation |
+| **P1-004** | ✅ | `onboarding/src/services/baileys-sidecar.ts` | Baileys sidecar (173 LOC, auto-reconnect) |
+| **P1-005** | ✅ | `onboarding/src/services/oauth-monitor.ts` | OAuth monitoring (118 LOC) |
+
+### 15.6 P1 Implementation Details
+
+**Phone Normalizer (P1-001):**
+- Function: `normalizePhoneNumber(raw: string): string`
+- Strips non-digit characters except `+`: `/[^+\d]/g`
+- Validates with `E164PhoneSchema.parse()`
+- Throws `ZodError` for invalid format
+
+**State Endpoints (P1-002):**
+- `GET /onboarding/state/:phone` - Returns state or 404
+- `POST /onboarding/update` - Updates name/email/status
+- `POST /onboarding/handover` - Marks status as `complete`
+- All routes protected with `webhookAuth` middleware
+
+**Trigger Investigation (P1-003):**
+- Confirmed: `message:received` hook is NOT implemented in OpenClaw
+- Documented three options: Manual curl (A), Baileys sidecar (B), Upstream contribution (C)
+- Recommended Option B (Custom Baileys Sidecar) - confirmed by OpenClaw founder
+
+**Baileys Sidecar (P1-004):**
+- Uses `@whiskeysockets/baileys@^7.0.0-rc.9`
+- Creates secondary WhatsApp connection with same auth
+- Listens to `messages.upsert` events
+- Checks SQLite for existing users via `getState()`
+- Calls webhook for unknown users only
+- Filters groups, broadcasts, self-messages
+- Auto-reconnects with exponential backoff (5s → 60s max)
+- Enable via `BAILEYS_SIDECAR_ENABLED=true`
+
+**OAuth Monitoring (P1-005):**
+- `checkOAuthHealth(agentId)` - Checks token file and 90-day expiry
+- `markOAuthFailed(phone, error)` - Updates state to `oauth_failed`
+- `cleanupExpiredTokens()` - Returns list of agents with expired tokens
+- Uses `fs.promises` API for async operations
+- Logs with `[oauth-monitor]` and `[oauth-failed]` prefixes
+
+---
+
 *End of ARCHITECTURE_REPORT.md*

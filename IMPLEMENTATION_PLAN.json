@@ -1,15 +1,12 @@
 {
   "project_name": "DonClaudioBot v2",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "last_updated": "2026-02-01",
   "design_notes": {
     "critical_investigation_required": {
-      "issue": "Hook trigger mechanism unclear",
-      "severity": "HIGH - Architectural assumption at risk",
-      "description": "The architecture assumes 'command:new' triggers on new WhatsApp messages, but QMD docs show OpenClaw hooks fire on agent commands (/new, /reset, /stop), not incoming messages. The onboarding trigger may need to be a channel-level event listener or Baileys 'messages.upsert' handler, not a hook.",
-      "action_required": "Before implementing P1-004, investigate how to trigger automation on new incoming WhatsApp message from unknown user. Search OpenClaw docs for 'messages.upsert', 'channel events', or 'inbox listener'.",
-      "fallback": "P1-004 now includes manual webhook testing as interim solution while trigger mechanism is clarified.",
-      "recommendation": "Consider running P1-003 as a spike BEFORE P0 implementation to de-risk this assumption early."
+      "status": "RESOLVED",
+      "resolution": "P1-003 investigation confirmed message:received hook is not implemented. P1-004 implemented Baileys sidecar (Option B) as recommended by OpenClaw founder.",
+      "implementation": "onboarding/src/services/baileys-sidecar.ts (173 LOC, auto-reconnect with exponential backoff)"
     },
     "qmd_verification_2026_01_31": {
       "verified_by": "Principal Engineer Review",
@@ -61,6 +58,14 @@
       "COMPLETED 2026-02-01: P0-010 marked complete - already using execFile() not exec()",
       "COMPLETED 2026-02-01: P0-011 marked complete - race condition handling already in place",
       "VERIFIED 2026-02-01: All P0 tasks (P0-001 through P0-011) now complete"
+    ],
+    "changes_from_v2.4.0": [
+      "COMPLETED 2026-02-01: P1-001 phone normalizer (27 LOC, E164PhoneSchema validation)",
+      "COMPLETED 2026-02-01: P1-002 state endpoints (58 LOC, GET/POST routes with webhookAuth)",
+      "COMPLETED 2026-02-01: P1-003 trigger investigation (docs/ONBOARDING_TRIGGER.md, confirmed message:received not implemented)",
+      "COMPLETED 2026-02-01: P1-004 Baileys sidecar (173 LOC, auto-reconnect with exponential backoff 5s→60s)",
+      "COMPLETED 2026-02-01: P1-005 OAuth monitoring (118 LOC, 90-day token expiry check)",
+      "VERIFIED 2026-02-01: All P1 tasks (P1-001 through P1-005) now complete"
     ]
   },
   "implementation_guidance": {
@@ -602,7 +607,7 @@
     {
       "id": "P1-001",
       "title": "Add phone number normalization utility",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": ["P0-001"],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/lib/phone-normalizer.ts. Implement function normalizePhoneNumber(raw: string): string that: (1) Strips all non-digit characters except leading + using raw.replace(/[^+\\d]/g, ''), (2) Validates result with E164PhoneSchema.parse(), (3) Returns normalized string, (4) Throws ZodError if invalid. Handle edge cases in comments: (1) Remove spaces, dashes, parentheses: '+1 (555) 123-4567' -> '+15551234567', (2) Ensure leading + for international format, (3) Reject if too short (<10 digits after +) or too long (>15 digits). Export function. Add E164PhoneSchema import from './validation'.",
@@ -625,18 +630,22 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'normalizePhoneNumber' src/lib/phone-normalizer.ts && grep -q 'E164PhoneSchema' src/lib/phone-normalizer.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q '/\\[^+\\\\d\\]/g' src/lib/phone-normalizer.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "Phone normalizer created at onboarding/src/lib/phone-normalizer.ts (27 LOC). Uses E164PhoneSchema for validation. Handles edge cases: strips non-digits except +, validates E.164 format. Export function normalizePhoneNumber()."
     },
     {
       "id": "P1-002",
       "title": "Implement state management endpoints",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": ["P0-003", "P0-004"],
       "description": "Implement /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/routes/state.ts replacing placeholder. Import express, webhookAuth, getState, updateState, setStatus. Export router = Router(). Apply webhookAuth middleware to all routes. GET /onboarding/state/:phone handler: const state = await getState(req.params.phone); if (!state) return res.status(404).json({error: 'Not found'}); return res.json(state). POST /onboarding/update handler: const {status, name, email} = req.body; if (!status && !name && !email) return res.status(400).json({error: 'At least one field required'}); await updateState(req.body.phone, {status, name, email}); return res.json({success: true}). POST /onboarding/handover: await setStatus(req.body.phone, 'complete'); return res.json({status: 'handed_over', agentId: result.agent_id}).",
@@ -659,22 +668,27 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q \"router.get('/onboarding/state/:phone'\" src/routes/state.ts && grep -q \"router.post('/onboarding/update'\" src/routes/state.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q \"/onboarding/handover\" src/routes/state.ts && grep -q 'setStatus' src/routes/state.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'webhookAuth' src/routes/state.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "State routes implemented at onboarding/src/routes/state.ts (58 LOC). GET /onboarding/state/:phone, POST /onboarding/update, POST /onboarding/handover. All routes protected with webhookAuth middleware. Returns 404 for not found, 400 for empty updates."
     },
     {
       "id": "P1-003",
       "title": "Investigate and document onboarding trigger mechanism",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": ["P0-008"],
       "description": "INVESTIGATION TASK: The architecture assumes 'command:new' triggers on new WhatsApp messages, but OpenClaw hooks fire on agent commands (/new, /reset), not incoming messages. This task investigates the correct trigger mechanism. Steps: (1) Search QMD for 'messages.upsert', 'inbox listener', 'channel events' to find incoming message handling, (2) Check if OpenClaw has a 'message:received' or 'dm:new' event type, (3) If no event exists, document alternative: Baileys WhatsApp library exposes 'messages.upsert' event that could call webhook directly, (4) Create /Users/jp/CodingProjects/DonClaudioBot/docs/ONBOARDING_TRIGGER.md documenting findings and recommended approach, (5) Include manual testing curl command for webhook while investigation continues. This unblocks P0 work - webhook can be called manually/externally until trigger is resolved.",
@@ -713,52 +727,85 @@
       "verification_steps": [
         {
           "command": "test -f /Users/jp/CodingProjects/DonClaudioBot/docs/ONBOARDING_TRIGGER.md",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "grep -q 'curl.*webhook/onboarding' /Users/jp/CodingProjects/DonClaudioBot/docs/ONBOARDING_TRIGGER.md",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "grep -qi 'messages.upsert\\|message:received\\|hook\\|trigger' /Users/jp/CodingProjects/DonClaudioBot/docs/ONBOARDING_TRIGGER.md",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "Investigation complete. Confirmed message:received hook is NOT implemented in OpenClaw (only 'Planned'). Documentation created at docs/ONBOARDING_TRIGGER.md. Recommended Option B (Custom Baileys Sidecar) which was implemented in P1-004. Manual webhook testing command documented."
     },
     {
       "id": "P1-004",
-      "title": "Implement onboarding trigger (based on P1-003 findings)",
-      "status": "pending",
+      "title": "Implement Baileys sidecar for automatic onboarding trigger",
+      "status": "completed",
       "priority": "P1",
-      "dependencies": ["P0-008", "P1-003"],
-      "description": "Implement the onboarding trigger based on P1-003 investigation findings. IF hooks are viable: Create ~/.openclaw/hooks/onboarding-trigger/ with HOOK.md and handler.ts per the original design. IF hooks are NOT viable: Implement alternative approach documented in P1-003 (likely a WhatsApp channel event listener or gateway modification). The implementation MUST: (1) Trigger when new/unknown user sends first WhatsApp message, (2) Call POST /webhook/onboarding with {phone: senderId}, (3) Include Authorization: Bearer $HOOK_TOKEN header, (4) Only trigger for WhatsApp DMs (not groups), (5) Be idempotent (webhook handles duplicate calls gracefully).",
+      "dependencies": ["P0-008", "P1-003", "P1-001"],
+      "description": "IMPLEMENTED: Baileys sidecar service (Option B per P1-003 investigation). Created onboarding/src/services/baileys-sidecar.ts (173 LOC) that: (1) Creates secondary WhatsApp connection using same auth as OpenClaw Gateway (~/.openclaw/credentials/whatsapp/<accountId>/creds.json), (2) Listens to Baileys messages.upsert events for incoming messages, (3) Checks SQLite for existing users via getState(phone), (4) Calls POST /webhook/onboarding for unknown users, (5) Ignores groups, broadcasts, self-messages, (6) Auto-reconnects with exponential backoff (5s → 60s max). Recommended by OpenClaw founder as pragmatic MVP choice. Enable via BAILEYS_SIDECAR_ENABLED=true env var.",
       "context": {
         "read_files": [
           "/Users/jp/CodingProjects/DonClaudioBot/docs/ONBOARDING_TRIGGER.md",
           "/Users/jp/CodingProjects/DonClaudioBot/.openclaw-reference/hooks.md"
         ],
         "edit_files": [
-          "Depends on P1-003 findings - likely ~/.openclaw/hooks/onboarding-trigger/ OR custom event listener"
+          "onboarding/src/services/baileys-sidecar.ts",
+          "onboarding/src/index.ts",
+          "onboarding/package.json"
         ]
       },
       "constraints": [
-        "MUST wait for P1-003 to complete - do not assume hook approach works",
-        "Use 127.0.0.1 not localhost (avoid IPv6 lookup issues)",
-        "Pass HOOK_TOKEN via Authorization: Bearer header",
-        "Only trigger for WhatsApp DM messages (check channel and peer type)",
-        "Log trigger attempts for debugging: '[onboarding-trigger] New message from: ' + phone"
+        "Use @whiskeysockets/baileys@^7.0.0-rc.9 (same version as OpenClaw)",
+        "Auth path: ~/.openclaw/credentials/whatsapp/<accountId>/creds.json (default accountId: 'default')",
+        "Use 127.0.0.1 not localhost for WEBHOOK_URL (avoid IPv6 lookup issues)",
+        "Pass HOOK_TOKEN via Authorization: Bearer header to webhook",
+        "Only trigger for WhatsApp DM messages (filter @g.us, @broadcast, fromMe)",
+        "Log with [baileys-sidecar] prefix for filtering",
+        "DO NOT call sendMessage() or interfere with OpenClaw Gateway connection",
+        "Reconnect with exponential backoff: 5s, 10s, 20s, 40s, 60s (max)"
       ],
       "verification_steps": [
         {
-          "command": "echo 'Verification depends on P1-003 findings - check ONBOARDING_TRIGGER.md for implementation path'",
-          "expected_output": "exit code 0"
+          "command": "grep -q '@whiskeysockets/baileys' /Users/jp/CodingProjects/DonClaudioBot/onboarding/package.json",
+          "expected_output": "exit code 0",
+          "status": "passed"
+        },
+        {
+          "command": "grep -q 'startBaileysSidecar' /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/index.ts",
+          "expected_output": "exit code 0",
+          "status": "passed"
+        },
+        {
+          "command": "grep -q 'makeWASocket' /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/baileys-sidecar.ts && grep -q 'messages.upsert' /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/baileys-sidecar.ts",
+          "expected_output": "exit code 0",
+          "status": "passed"
+        },
+        {
+          "command": "grep -q 'reconnectDelay.*60000' /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/baileys-sidecar.ts || grep -q 'MAX_RECONNECT_DELAY' /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/baileys-sidecar.ts",
+          "expected_output": "exit code 0",
+          "status": "passed"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "Baileys sidecar implemented (173 LOC after Karpathy simplification from 214 LOC). Uses makeWASocket with existing auth, listens to messages.upsert, filters groups/broadcasts/self, checks SQLite via getState(), triggers webhook for unknown users. Auto-reconnect with exponential backoff. Enable via BAILEYS_SIDECAR_ENABLED=true. OpenClaw founder confirmed this is the right pragmatic choice for MVP. See commit e1a9676."
     },
     {
       "id": "P1-005",
       "title": "Implement OAuth refresh failure handling",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": ["P0-003"],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/oauth-monitor.ts. Implement functions: (1) checkOAuthHealth(agentId: string): Promise<{healthy: boolean, error?: string}> - checks if ~/.openclaw/agents/{agentId}/agent/.gog/tokens.json exists via fs.access(), reads file, checks expiry field > Date.now(), returns {healthy: false, error: 'Token expired'} if >90 days old, (2) markOAuthFailed(phone: string, error: string): Promise<void> - calls updateState(phone, {oauth_error: error, status: 'oauth_failed'}), (3) cleanupExpiredTokens(): Promise<string[]> - lists all agents in ~/.openclaw/agents/, checks each for expired tokens (>90 days), returns array of expired agent IDs, logs '[oauth-monitor] Found expired tokens for agent: {id}'. Export all functions.",
@@ -781,17 +828,22 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'checkOAuthHealth' src/services/oauth-monitor.ts && grep -q 'markOAuthFailed' src/services/oauth-monitor.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q '.gog/tokens.json' src/services/oauth-monitor.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'oauth-failed' src/services/oauth-monitor.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "OAuth monitoring service created at onboarding/src/services/oauth-monitor.ts (118 LOC). checkOAuthHealth() checks token file existence and expiry (>90 days). markOAuthFailed() updates state to 'oauth_failed'. cleanupExpiredTokens() scans all agents and returns expired list. Uses fs.promises for async operations. Logs with [oauth-monitor] and [oauth-failed] prefixes."
     },
     {
       "id": "P1-006",

@@ -1,6 +1,6 @@
 {
   "project_name": "DonClaudioBot v2",
-  "version": "2.8.1",
+  "version": "2.11.0",
   "last_updated": "2026-02-01",
   "design_notes": {
     "critical_investigation_required": {
@@ -78,6 +78,26 @@
     ],
     "changes_from_v2.8.0": [
       "FIXED 2026-02-01: P2-003 gog CLI installation URL - replaced placeholder with official GitHub releases download per OpenClaw docs"
+    ],
+    "changes_from_v2.9.0": [
+      "COMPLETED 2026-02-01: P2-004 sandbox build script (8 LOC, bash wrapper for docker build)"
+    ],
+    "changes_from_v2.10.0": [
+      "COMPLETED 2026-02-01: P2-002 integration tests for onboarding flow (138 LOC, vitest + supertest, 4 tests all passing)"
+    ],
+    "changes_from_v2.11.0": [
+      "POST-REVIEW 2026-02-01: Added P0-012 through P0-016 (MUST FIX tasks from three-agent code review)",
+      "POST-REVIEW 2026-02-01: Added P1-007 through P1-011 (SHOULD FIX tasks for production hardening)",
+      "POST-REVIEW 2026-02-01: P0-012 fixes TypeScript compilation error blocking deployment",
+      "POST-REVIEW 2026-02-01: P0-013 adds Docker security mitigations (non-root, cap_drop, seccomp)",
+      "POST-REVIEW 2026-02-01: P0-014 adds rate limiting to prevent DoS attacks",
+      "POST-REVIEW 2026-02-01: P0-015 creates .env.example for environment configuration",
+      "POST-REVIEW 2026-02-01: P0-016 verifies build passes with full test suite",
+      "POST-REVIEW 2026-02-01: P1-007 adds audit logging per ARCHITECTURE_REPORT.md Section 13.9",
+      "POST-REVIEW 2026-02-01: P1-008 adds sandbox config validation per AR Section 13.6",
+      "POST-REVIEW 2026-02-01: P1-009 implements backup script for don-claudio-state volume",
+      "POST-REVIEW 2026-02-01: P1-010 creates deployment checklist and runbook",
+      "POST-REVIEW 2026-02-01: P1-011 schedules reconciliation and OAuth monitoring as cron jobs"
     ]
   },
   "implementation_guidance": {
@@ -952,7 +972,9 @@
     {
       "id": "P2-002",
       "title": "Add integration tests for onboarding flow",
-      "status": "pending",
+      "status": "completed",
+      "completed_at": "2026-02-01",
+      "comments": "Integration tests created at onboarding/src/__tests__/onboarding.flow.test.ts (138 LOC). 4 tests: testWebhookCreatesAgent (201 status), testIdempotentCall (200 existing), testInvalidPhone (400 validation), testMissingAuth (401 auth). Uses vitest + supertest with vi.mock() for agent-creator and state-manager. Created vitest.config.ts, vitest.setup.ts for environment setup. Added vitest, supertest, @types/supertest to devDependencies. Test script added to package.json: 'npm test'. All 4 tests passing.",
       "priority": "P2",
       "dependencies": ["P0-008"],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/__tests__/onboarding.flow.test.ts using vitest. Import {describe, it, expect, vi, beforeEach} from 'vitest', {createAgent, getState} from '../services/agent-creator', request from 'supertest'. Mock services: vi.mock('../services/agent-creator'), vi.mock('../services/state-manager'). Test suite: (1) testWebhookCreatesAgent - mocks createAgent.mockResolvedValue('user_abc123'), mocks getState.mockResolvedValue(null), calls POST /webhook/onboarding with {phone: '+15551234567'}, expects 201 with {status: 'created', agentId: 'user_abc123'}, (2) testIdempotentCall - mocks getState.mockResolvedValue({agent_id: 'user_existing', status: 'active'}), calls webhook twice, expects 200 second time with same agentId, (3) testInvalidPhone - sends {phone: 'invalid'}, expects 400 with error message, (4) testMissingAuth - sends without Authorization header, expects 401. Run with 'npm test'.",
@@ -976,15 +998,18 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q \"describe('onboarding flow'\" src/__tests__/onboarding.flow.test.ts && grep -q 'vitest' package.json",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'vi.mock' src/__tests__/onboarding.flow.test.ts && grep -q 'supertest' src/__tests__/onboarding.flow.test.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'beforeEach' src/__tests__/onboarding.flow.test.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
       ]
     },
@@ -1030,7 +1055,7 @@
     {
       "id": "P2-004",
       "title": "Create sandbox build script",
-      "status": "pending",
+      "status": "completed",
       "priority": "P2",
       "dependencies": ["P2-003"],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/scripts/build-sandbox.sh bash script to build sandbox image. #!/bin/bash. set -e. IMAGE_NAME='openclaw-sandbox:bookworm-slim'. DOCKERFILE='config/sandbox/Dockerfile.sandbox'. echo 'Building sandbox image: $IMAGE_NAME...'. docker build -f \"$DOCKERFILE\" -t \"$IMAGE_NAME\" . echo 'Sandbox image built successfully: $IMAGE_NAME'. echo 'To verify: docker run --rm $IMAGE_NAME gog --version'. Make executable with chmod +x. This script builds the sandbox Docker image with gog CLI pre-installed for use in agent sandboxes.",
@@ -1051,17 +1076,488 @@
       "verification_steps": [
         {
           "command": "grep -q 'set -e' /Users/jp/CodingProjects/DonClaudioBot/scripts/build-sandbox.sh && grep -q 'docker build' /Users/jp/CodingProjects/DonClaudioBot/scripts/build-sandbox.sh",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "grep -q 'openclaw-sandbox:bookworm-slim' /Users/jp/CodingProjects/DonClaudioBot/scripts/build-sandbox.sh",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "test -x /Users/jp/CodingProjects/DonClaudioBot/scripts/build-sandbox.sh",
+          "expected_output": "exit code 0",
+          "status": "passed"
+        }
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "Build script created at scripts/build-sandbox.sh (8 LOC). Simple bash wrapper with set -e fail-fast, builds openclaw-sandbox:bookworm-slim image from Dockerfile.sandbox, logs progress, includes verification command. All 3 verification steps passed."
+    },
+    {
+      "id": "P0-012",
+      "title": "Fix TypeScript compilation error in integration tests",
+      "status": "pending",
+      "priority": "P0",
+      "dependencies": [],
+      "description": "Fix TypeScript compilation error in /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/__tests__/onboarding.flow.test.ts line 15. Error: 'TS2698: Spread types may only be created from object types' when spreading `actual` in vi.mock(). The issue is that `await importOriginal()` returns `unknown` type, which cannot be spread. Fix by casting to `Record<string, unknown>` before spreading: 'const actual = await importOriginal() as Record<string, unknown>;'. Alternative fix: Replace spread with explicit object definition that only overrides specific exports.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/__tests__/onboarding.flow.test.ts"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/__tests__/onboarding.flow.test.ts"
+        ]
+      },
+      "constraints": [
+        "Must preserve vi.mock() structure for vitest mocking",
+        "All mocked functions (getState, createAgent) must remain properly mocked",
+        "Fix should be surgical - only change the type cast or spread pattern",
+        "Do not modify test logic - only fix TypeScript compilation",
+        "After fix, 'npm run build' must succeed with exit code 0",
+        "After fix, 'npm test' must run all 4 tests successfully"
+      ],
+      "verification_steps": [
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
+          "expected_output": "exit code 0",
+          "note": "TypeScript must compile without errors"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npm test",
+          "expected_output": "All 4 tests pass",
+          "note": "Test suite must run successfully"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npm run build",
+          "expected_output": "exit code 0",
+          "note": "Production build must succeed"
+        }
+      ],
+      "severity": "CRITICAL",
+      "blocker_reason": "Blocks deployment - build is broken, cannot create production artifact",
+      "source": "Three-agent code review 2026-02-01 - Code Review Agent finding"
+    },
+    {
+      "id": "P0-013",
+      "title": "Add Docker security hardening to docker-compose.yml",
+      "status": "pending",
+      "priority": "P0",
+      "dependencies": [],
+      "description": "Add security mitigations to /Users/jp/CodingProjects/DonClaudioBot/docker/docker-compose.yml per ARCHITECTURE_REPORT.md section 13.5 Phase 1 mitigations. The Docker socket mount (/var/run/docker.sock:/var/run/docker.sock) is a CRITICAL security risk. Add: (1) user: '1000:1000' to run as non-root, (2) cap_drop: [ALL] to drop all Linux capabilities, (3) security_opt: [no-new-privileges:true] to prevent privilege escalation, (4) read_only: true for read-only root filesystem (optional, may break tmp writes). These mitigations reduce container breakout risk. Reference: ARCHITECTURE_REPORT.md Section 13.5 Docker Socket Risk Mitigation.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/ARCHITECTURE_REPORT.md (section 13.5 Docker Socket Risk Mitigation)",
+          "/Users/jp/CodingProjects/DonClaudioBot/docker/docker-compose.yml"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/docker/docker-compose.yml"
+        ]
+      },
+      "constraints": [
+        "Add user directive under service definition: user: '1000:1000'",
+        "Add cap_drop directive: cap_drop: [ALL]",
+        "Add security_opt: [no-new-privileges:true]",
+        "Do NOT remove Docker socket mount - OpenClaw needs it for sandbox spawning",
+        "If using read_only: true, add tmpfs mounts for /tmp and writable paths",
+        "Test container starts successfully after changes",
+        "Verify container runs as non-root (check with 'docker exec don-claudio-bot id')"
+      ],
+      "verification_steps": [
+        {
+          "command": "grep -q \"user: '1000:1000'\" /Users/jp/CodingProjects/DonClaudioBot/docker/docker-compose.yml",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'cap_drop:' /Users/jp/CodingProjects/DonClaudioBot/docker/docker-compose.yml && grep -q 'security_opt:' /Users/jp/CodingProjects/DonClaudioBot/docker/docker-compose.yml",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/docker && docker compose config > /dev/null 2>&1",
+          "expected_output": "exit code 0",
+          "note": "Compose config must be valid YAML"
+        }
+      ],
+      "severity": "CRITICAL",
+      "blocker_reason": "Docker socket mount without hardening is a production security vulnerability - container escape gives host root access",
+      "source": "Three-agent code review 2026-02-01 - Implementation Audit Agent critical finding"
+    },
+    {
+      "id": "P0-014",
+      "title": "Add rate limiting to webhook endpoint",
+      "status": "pending",
+      "priority": "P0",
+      "dependencies": [],
+      "description": "Add rate limiting middleware to /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/routes/webhook.ts to prevent DoS attacks. Install express-rate-limit package: 'npm install express-rate-limit @types/express-rate-limit'. Import rateLimit from 'express-rate-limit'. Create rateLimiter = rateLimit({ windowMs: 60000, max: 10, message: 'Too many requests', standardHeaders: true, legacyHeaders: false }). Apply to POST /webhook/onboarding: router.post('/webhook/onboarding', rateLimiter, webhookAuth, handler). This limits to 10 requests per minute per IP address, preventing abuse while allowing legitimate retries.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/ARCHITECTURE_REPORT.md (section 13.9 Security Checklist - High Priority)",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/routes/webhook.ts"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/routes/webhook.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/package.json"
+        ]
+      },
+      "constraints": [
+        "Install express-rate-limit and @types/express-rate-limit as dependencies",
+        "Rate limit: 10 requests per minute (windowMs: 60000, max: 10)",
+        "Apply rateLimiter middleware BEFORE webhookAuth (order matters)",
+        "Include 'X-RateLimit-*' headers in response (standardHeaders: true)",
+        "Return 429 status with 'Too many requests' message when limit exceeded",
+        "Log rate limit violations: console.warn('[ratelimit] IP exceeded rate limit')"
+      ],
+      "verification_steps": [
+        {
+          "command": "grep -q 'express-rate-limit' /Users/jp/CodingProjects/DonClaudioBot/onboarding/package.json",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'rateLimit' src/routes/webhook.ts && grep -q 'windowMs' src/routes/webhook.ts",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
+          "expected_output": "exit code 0",
+          "note": "TypeScript must compile"
+        },
+        {
+          "command": "for i in {1..12}; do curl -s -X POST -H 'Content-Type: application/json' -d '{\"phone\":\"+15551234567\"}' http://127.0.0.1:3000/webhook/onboarding -o /dev/null -w '%{http_code}\\n'; done | grep -q '429'",
+          "expected_output": "exit code 0",
+          "note": "11th and 12th requests should return 429 (requires server running)"
+        }
+      ],
+      "severity": "CRITICAL",
+      "blocker_reason": "Webhook endpoint has NO rate limiting - attacker can spam agent creation, exhaust host resources, DoS the service",
+      "source": "Three-agent code review 2026-02-01 - Architecture Expert Agent critical risk"
+    },
+    {
+      "id": "P0-015",
+      "title": "Create .env.example file for environment configuration",
+      "status": "pending",
+      "priority": "P0",
+      "dependencies": [],
+      "description": "Create /Users/jp/CodingProjects/DonClaudioBot/.env.example file documenting all required and optional environment variables. Include: (1) GATEWAY_TOKEN - OpenClaw gateway auth token (generate with: openssl rand -base64 32), (2) HOOK_TOKEN - Webhook authentication token (generate with: openssl rand -base64 32), (3) PORT - Onboarding service port (default: 3000), (4) BAILEYS_SIDECAR_ENABLED - Enable Baileys sidecar (default: false), (5) OPENCLAW_CONFIG_PATH - Path to openclaw.json (default: ~/.openclaw/openclaw.json), (6) OPENCLAW_STATE_DIR - Path to state directory (default: ~/.openclaw). Add comments explaining each variable and security considerations. Add instructions: 'cp .env.example .env && edit .env # Generate fresh tokens with openssl rand -base64 32'",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/index.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/config/openclaw.json.template"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/.env.example"
+        ]
+      },
+      "constraints": [
+        "File must be named exactly '.env.example' (not .env - that should be in .gitignore)",
+        "All env vars used in code must be documented",
+        "Include generation commands for secrets (use openssl rand -base64 32)",
+        "Add SECURITY WARNING comment about not committing actual .env file",
+        "Include default values in comments (e.g., # PORT=3000)",
+        "Add to .gitignore: '.env' (if not already present)"
+      ],
+      "verification_steps": [
+        {
+          "command": "test -f /Users/jp/CodingProjects/DonClaudioBot/.env.example",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'GATEWAY_TOKEN=' /Users/jp/CodingProjects/DonClaudioBot/.env.example && grep -q 'HOOK_TOKEN=' /Users/jp/CodingProjects/DonClaudioBot/.env.example",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'openssl rand' /Users/jp/CodingProjects/DonClaudioBot/.env.example",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q '^\\.env$' /Users/jp/CodingProjects/DonClaudioBot/.gitignore",
           "expected_output": "exit code 0"
         }
-      ]
+      ],
+      "severity": "HIGH",
+      "blocker_reason": "Cannot deploy without documented environment variables - operators don't know what secrets to generate",
+      "source": "Three-agent code review 2026-02-01 - Implementation Audit Agent gap"
+    },
+    {
+      "id": "P0-016",
+      "title": "Verify build passes with full test suite",
+      "status": "pending",
+      "priority": "P0",
+      "dependencies": ["P0-012"],
+      "description": "After fixing TypeScript compilation (P0-012), run full build and test verification. Execute: (1) cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npm run build - verify TypeScript compiles to dist/ without errors, (2) npm test - verify all 4 integration tests pass, (3) npm run lint (if script exists) - verify no linting errors, (4) Check dist/index.js exists and is executable. This task confirms the codebase is in a deployable state. If any step fails, create follow-up task to fix. This is a GATEKEEPER task - all must pass before deployment.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/package.json"
+        ],
+        "edit_files": []
+      },
+      "constraints": [
+        "This task depends on P0-012 (TypeScript fix) - cannot pass until build is fixed",
+        "Run 'npm run build' first - must exit with code 0",
+        "Run 'npm test' second - all tests must pass (look for 'PASS' in vitest output)",
+        "If build fails, P0-012 is not complete - return to that task",
+        "If tests fail, investigate and create fix task or update test expectations",
+        "Document results: create VERIFY_BUILD_RESULTS.md with build/test output"
+      ],
+      "verification_steps": [
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npm run build 2>&1 | tee /tmp/build.log",
+          "expected_output": "exit code 0, no TypeScript errors"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npm test 2>&1 | tee /tmp/test.log",
+          "expected_output": "All tests pass (exit code 0)"
+        },
+        {
+          "command": "test -f /Users/jp/CodingProjects/DonClaudioBot/onboarding/dist/index.js && test -x /Users/jp/CodingProjects/DonClaudioBot/onboarding/dist/index.js",
+          "expected_output": "exit code 0"
+        }
+      ],
+      "severity": "HIGH",
+      "blocker_reason": "Cannot deploy without verified working build - this is the final gatekeeper before production",
+      "source": "Three-agent code review 2026-02-01 - consolidated recommendation"
+    },
+    {
+      "id": "P1-007",
+      "title": "Add audit logging for security events",
+      "status": "pending",
+      "priority": "P1",
+      "dependencies": [],
+      "description": "Implement audit logging per ARCHITECTURE_REPORT.md section 13.9 Critical requirements. Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/lib/audit-logger.ts with: (1) logAgentCreation(phone, agentId, success, error?) - logs '[audit:agent:create] phone={phone} agentId={agentId} success={success} error={error}', (2) logConfigChange(action, details) - logs '[audit:config] action={action} details={JSON.stringify(details)}', (3) logTokenAccess(agentId) - logs '[audit:token] agentId={agentId} action=access', (4) logAuthFailure(ip, reason) - logs '[audit:auth] ip={ip} reason={reason}'. Integrate into webhook.ts, agent-creator.ts, config-writer.ts, webhook-auth.ts. Use structured logging (JSON format) for machine parsing.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/ARCHITECTURE_REPORT.md (section 13.9 Security Checklist - Critical)",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/routes/webhook.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/agent-creator.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/config-writer.ts"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/lib/audit-logger.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/routes/webhook.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/agent-creator.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/config-writer.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/middleware/webhook-auth.ts"
+        ]
+      },
+      "constraints": [
+        "All audit logs must use '[audit:category]' prefix for filtering",
+        "Include timestamp in ISO 8601 format (new Date().toISOString())",
+        "Log to stdout (console.log) - Docker will capture logs",
+        "Redact sensitive values: never log HOOK_TOKEN, GOG_KEYRING_PASSWORD, phone numbers partially",
+        "Use structured logging: console.log(JSON.stringify({timestamp, category, event, details}))",
+        "Integrate logAgentCreation into webhook.ts after createAgent() call",
+        "Integrate logConfigChange into config-writer.ts after writeConfigAtomic()",
+        "Integrate logAuthFailure into webhook-auth.ts on 401/403 responses"
+      ],
+      "verification_steps": [
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'audit-logger' src/lib/audit-logger.ts && grep -q 'logAgentCreation' src/lib/audit-logger.ts",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'import.*audit-logger' src/routes/webhook.ts && grep -q 'logAgentCreation' src/routes/webhook.ts",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'logAuthFailure' src/middleware/webhook-auth.ts",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
+          "expected_output": "exit code 0"
+        }
+      ],
+      "severity": "HIGH",
+      "source": "ARCHITECTURE_REPORT.md Section 13.9 Critical - 'Audit Logging (all agent creations, token access, config changes)'",
+      "recommended_before": "Public launch - required for security compliance and incident investigation"
+    },
+    {
+      "id": "P1-008",
+      "title": "Add sandbox config validation",
+      "status": "pending",
+      "priority": "P1",
+      "dependencies": [],
+      "description": "Implement validateSandboxConfig() function per ARCHITECTURE_REPORT.md section 13.6. Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/lib/sandbox-validator.ts with validateSandboxConfig(agentConfig: AgentConfig): void function that: (1) Throws error if sandbox.docker.privileged === true, (2) Throws error if !sandbox.docker.capDrop?.includes('ALL'), (3) Throws error if sandbox.docker.binds?.some(b => b.includes('docker.sock')), (4) Throws error if sandbox.workspaceAccess !== 'ro' && sandbox.workspaceAccess !== 'none', (5) Logs warnings for non-critical issues. Call this function in agent-creator.ts BEFORE addAgentToConfig(). This prevents insecure sandbox configurations from being deployed.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/ARCHITECTURE_REPORT.md (section 13.6 Sandbox Configuration Validation)",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/agent-creator.ts"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/lib/sandbox-validator.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/agent-creator.ts"
+        ]
+      },
+      "constraints": [
+        "validateSandboxConfig() must throw Error with 'CRITICAL:' prefix for security issues",
+        "Check privileged: true - throw 'CRITICAL: Privileged mode is NOT allowed'",
+        "Check capDrop includes 'ALL' - throw 'CRITICAL: Must drop all capabilities'",
+        "Check binds don't include docker.sock - throw 'CRITICAL: Docker socket mount in sandbox'",
+        "Check workspaceAccess is 'ro' or 'none' - throw 'CRITICAL: Workspace must be read-only or none'",
+        "Call validateSandboxConfig(agentConfig) in agent-creator.ts before addAgentToConfig()",
+        "Wrap in try/catch - if validation fails, rollback agent creation"
+      ],
+      "verification_steps": [
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'validateSandboxConfig' src/lib/sandbox-validator.ts && grep -q 'privileged' src/lib/sandbox-validator.ts",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'import.*sandbox-validator' src/services/agent-creator.ts && grep -q 'validateSandboxConfig' src/services/agent-creator.ts",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
+          "expected_output": "exit code 0"
+        }
+      ],
+      "severity": "HIGH",
+      "source": "ARCHITECTURE_REPORT.md Section 13.6 - 'Runtime validation that privileged is false, caps dropped, etc.'",
+      "recommended_before": "Production deployment - prevents insecure sandbox configurations"
+    },
+    {
+      "id": "P1-009",
+      "title": "Implement backup script for state volume",
+      "status": "pending",
+      "priority": "P1",
+      "dependencies": [],
+      "description": "Create /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh bash script to backup the don-claudio-state Docker volume. Script should: (1) Create backup volume if not exists: docker volume create don-claudio-state-backup, (2) Run backup container: docker run --rm -v don-claudio-state:/from -v don-claudio-state-backup:/to alpine tar czf /to/backup-$(date +%Y%m%d-%H%M%S).tar.gz -C /from ., (3) List backups: docker run --rm -v don-claudio-state-backup:/data alpine ls -lh /data, (4) Retain last 7 backups, delete older ones. Make executable: chmod +x. Reference: DEPLOYMENT.md mentions backup script but doesn't exist. This preserves WhatsApp auth and all state in case of disaster.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/docker/docker-compose.yml",
+          "/Users/jp/CodingProjects/DonClaudioBot/DEPLOYMENT.md"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh"
+        ]
+      },
+      "constraints": [
+        "Use 'set -e' for fail-fast error handling",
+        "Backup volume name: don-claudio-state-backup",
+        "Source volume: don-claudio-state (defined in docker-compose.yml)",
+        "Backup filename format: backup-YYYYMMDD-HHMMSS.tar.gz",
+        "Use alpine:latest image for tar operations (lightweight)",
+        "Retain 7 most recent backups, delete older: 'ls -t | tail -n +8 | xargs rm -f'",
+        "Log all actions with echo statements",
+        "Add usage instruction: './scripts/backup.sh' to run manually or add to crontab"
+      ],
+      "verification_steps": [
+        {
+          "command": "test -f /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh && test -x /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'don-claudio-state' /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh && grep -q 'backup-' /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'set -e' /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh && grep -q 'tar czf' /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'tail -n +8' /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh",
+          "expected_output": "exit code 0",
+          "note": "Retention policy implemented"
+        }
+      ],
+      "severity": "HIGH",
+      "source": "DEPLOYMENT.md references scripts/backup.sh but file doesn't exist",
+      "recommended_before": "Production deployment - data loss without backups is catastrophic"
+    },
+    {
+      "id": "P1-010",
+      "title": "Create deployment checklist and runbook",
+      "status": "pending",
+      "priority": "P1",
+      "dependencies": ["P0-013", "P0-014", "P0-015", "P1-009"],
+      "description": "Create /Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md documenting production deployment procedures. Include: (1) Pre-deployment checklist (env vars, Docker security, backup, build verification), (2) Step-by-step deployment process with exact commands, (3) Post-deployment verification (health checks, webhook test, WhatsApp auth test), (4) Rollback procedure if deployment fails, (5) Common failure scenarios and recovery steps, (6) Monitoring commands (docker compose logs, volume inspect), (7) Contact/emergency procedures. This is the runbook for operators deploying to Hetzner VPS at 135.181.93.227.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/DEPLOYMENT.md",
+          "/Users/jp/CodingProjects/DonClaudioBot/scripts/deploy.sh"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md"
+        ]
+      },
+      "constraints": [
+        "Format as Markdown with numbered checklist items ([ ] for unchecked, [x] for checked)",
+        "Include exact bash commands that can be copy-pasted",
+        "Pre-deployment section must verify: .env exists, Docker security applied, backup recent, build passes",
+        "Deployment section: step-by-step from ./scripts/deploy.sh to health check",
+        "Post-deployment: curl health endpoint, test webhook with curl, verify WhatsApp connected",
+        "Rollback section: 'docker compose down && docker volume rollback don-claudio-state-backup && docker compose up -d'",
+        "Include common issues: 'Container won't start', 'WhatsApp auth lost', 'Webhook returns 500'",
+        "Add 'Emergency Contact' section (even if placeholder)"
+      ],
+      "verification_steps": [
+        {
+          "command": "test -f /Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'Pre-deployment' /Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md && grep -q 'Rollback' /Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'curl.*health' /Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md && grep -q 'webhook' /Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'docker compose logs' /Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md",
+          "expected_output": "exit code 0"
+        }
+      ],
+      "severity": "HIGH",
+      "source": "Three-agent review recommendation - 'Create runbook for common failures'",
+      "recommended_before": "Production deployment - operators need documented procedures"
+    },
+    {
+      "id": "P1-011",
+      "title": "Schedule reconciliation and OAuth monitoring cron jobs",
+      "status": "pending",
+      "priority": "P1",
+      "dependencies": ["P1-005", "P1-006"],
+      "description": "Create /Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh bash script that configures cron jobs for periodic tasks. Jobs to schedule: (1) Hourly reconciliation: 0 * * * * cd /root/don-claudio-bot/onboarding && node dist/services/reconciliation.js >> /var/log/don-claudio-reconciliation.log 2>&1, (2) Daily OAuth expiry check: 0 2 * * * cd /root/don-claudio-bot/onboarding && node dist/services/oauth-monitor.js >> /var/log/don-claudio-oauth.log 2>&1, (3) Daily backup: 0 3 * * * /root/don-claudio-bot/scripts/backup.sh. Script should add jobs to crontab using 'crontab -l | { cat; echo \"jobs\"; } | crontab -'. Also create logrotate config for log files.",
+      "context": {
+        "read_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/reconciliation.ts",
+          "/Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/oauth-monitor.ts"
+        ],
+        "edit_files": [
+          "/Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh",
+          "/Users/jp/CodingProjects/DonClaudioBot/config/logrotate-don-claudio"
+        ]
+      },
+      "constraints": [
+        "Cron jobs must run as root (DonClaudioBot runs as root in container)",
+        "Reconciliation: hourly (0 * * * *) - cleans up orphaned agents/stale states",
+        "OAuth check: daily at 2 AM (0 2 * * *) - scans for tokens >90 days old",
+        "Backup: daily at 3 AM (0 3 * * *) - runs backup.sh script",
+        "All cron output must log to /var/log/don-claudio-*.log files",
+        "Create logrotate config: /etc/logrotate.d/don-claudio with weekly rotation, keep 4 weeks",
+        "cron-setup.sh should be idempotent - can run multiple times safely",
+        "Add 'crontab -l' output at end of script to verify jobs installed"
+      ],
+      "verification_steps": [
+        {
+          "command": "test -f /Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh && test -x /Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q 'reconciliation' /Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh && grep -q 'oauth-monitor' /Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "grep -q '0 \\* \\* \\* \\*' /Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh && grep -q 'backup.sh' /Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh",
+          "expected_output": "exit code 0"
+        },
+        {
+          "command": "test -f /Users/jp/CodingProjects/DonClaudioBot/config/logrotate-don-claudio",
+          "expected_output": "exit code 0"
+        }
+      ],
+      "severity": "MEDIUM",
+      "source": "P1-005 and P1-006 exist but aren't automated - need cron scheduling",
+      "recommended_before": "Production deployment - without automation, these manual tasks will be forgotten"
     }
   ]
 }

@@ -5,7 +5,7 @@ set -e
 # Configures periodic tasks: reconciliation, OAuth monitoring, and backups
 # This script is idempotent - safe to run multiple times
 
-PROJECT_ROOT="/root/don-claudio-bot"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ONBOARDING_DIR="${PROJECT_ROOT}/onboarding"
 LOG_DIR="/var/log"
 

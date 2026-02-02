@@ -34,6 +34,13 @@ services:
     security_opt:
       - no-new-privileges:true
     # Drop Linux capabilities (except those needed for Docker socket)
+    # NOTE: cap_drop: [ALL] may conflict with /var/run/docker.sock mount needed for sandbox containers
+    # If sandbox creation fails with permission errors, add specific capabilities back:
+    #   cap_add:
+    #     - DAC_OVERRIDE  # For file access within sandbox
+    #     - SETGID        # For group operations
+    #     - SETUID        # For user operations
+    # Keeping ALL dropped for defense-in-depth until/unless sandbox operations require otherwise
     cap_drop:
       - ALL
     healthcheck:

@@ -28,6 +28,7 @@ export interface AgentConfig {
     mode: string;
     scope: string;
     workspaceAccess: string;
+    timeoutMs?: number;
     docker: {
       image: string;
       env: Record<string, string>;
@@ -93,6 +94,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
         mode: 'all',
         scope: 'agent',
         workspaceAccess: 'ro',
+        timeoutMs: 30000,
         docker: {
           image: 'openclaw-sandbox:bookworm-slim',
           env: {

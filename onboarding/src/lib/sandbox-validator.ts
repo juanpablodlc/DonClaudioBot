@@ -42,4 +42,11 @@ export function validateSandboxConfig(config: AgentConfig): void {
     console.error(`[sandbox-validator] ${error}`);
     throw new Error(error);
   }
+
+  // 5. Ensure timeout is at least 5000ms
+  if (sandbox.timeoutMs !== undefined && sandbox.timeoutMs < 5000) {
+    const error = 'CRITICAL: Sandbox timeout must be at least 5000ms';
+    console.error(`[sandbox-validator] ${error}`);
+    throw new Error(error);
+  }
 }

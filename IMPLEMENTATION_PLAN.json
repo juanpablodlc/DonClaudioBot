@@ -1384,7 +1384,7 @@
     {
       "id": "P1-008",
       "title": "Add sandbox config validation",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": [],
       "description": "Implement validateSandboxConfig() function per ARCHITECTURE_REPORT.md section 13.6. Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/lib/sandbox-validator.ts with validateSandboxConfig(agentConfig: AgentConfig): void function that: (1) Throws error if sandbox.docker.privileged === true, (2) Throws error if !sandbox.docker.capDrop?.includes('ALL'), (3) Throws error if sandbox.docker.binds?.some(b => b.includes('docker.sock')), (4) Throws error if sandbox.workspaceAccess !== 'ro' && sandbox.workspaceAccess !== 'none', (5) Logs warnings for non-critical issues. Call this function in agent-creator.ts BEFORE addAgentToConfig(). This prevents insecure sandbox configurations from being deployed.",
@@ -1428,7 +1428,7 @@
     {
       "id": "P1-009",
       "title": "Implement backup script for state volume",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": [],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/scripts/backup.sh bash script to backup the don-claudio-state Docker volume. Script should: (1) Create backup volume if not exists: docker volume create don-claudio-state-backup, (2) Run backup container: docker run --rm -v don-claudio-state:/from -v don-claudio-state-backup:/to alpine tar czf /to/backup-$(date +%Y%m%d-%H%M%S).tar.gz -C /from ., (3) List backups: docker run --rm -v don-claudio-state-backup:/data alpine ls -lh /data, (4) Retain last 7 backups, delete older ones. Make executable: chmod +x. Reference: DEPLOYMENT.md mentions backup script but doesn't exist. This preserves WhatsApp auth and all state in case of disaster.",
@@ -1477,7 +1477,7 @@
     {
       "id": "P1-010",
       "title": "Create deployment checklist and runbook",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": ["P0-013", "P0-014", "P0-015", "P1-009"],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/docs/DEPLOYMENT_CHECKLIST.md documenting production deployment procedures. Include: (1) Pre-deployment checklist (env vars, Docker security, backup, build verification), (2) Step-by-step deployment process with exact commands, (3) Post-deployment verification (health checks, webhook test, WhatsApp auth test), (4) Rollback procedure if deployment fails, (5) Common failure scenarios and recovery steps, (6) Monitoring commands (docker compose logs, volume inspect), (7) Contact/emergency procedures. This is the runbook for operators deploying to Hetzner VPS at 135.181.93.227.",
@@ -1525,7 +1525,7 @@
     {
       "id": "P1-011",
       "title": "Schedule reconciliation and OAuth monitoring cron jobs",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": ["P1-005", "P1-006"],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/scripts/cron-setup.sh bash script that configures cron jobs for periodic tasks. Jobs to schedule: (1) Hourly reconciliation: 0 * * * * cd /root/don-claudio-bot/onboarding && node dist/services/reconciliation.js >> /var/log/don-claudio-reconciliation.log 2>&1, (2) Daily OAuth expiry check: 0 2 * * * cd /root/don-claudio-bot/onboarding && node dist/services/oauth-monitor.js >> /var/log/don-claudio-oauth.log 2>&1, (3) Daily backup: 0 3 * * * /root/don-claudio-bot/scripts/backup.sh. Script should add jobs to crontab using 'crontab -l | { cat; echo \"jobs\"; } | crontab -'. Also create logrotate config for log files.",

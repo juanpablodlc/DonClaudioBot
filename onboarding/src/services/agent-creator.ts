@@ -35,6 +35,9 @@ export interface AgentConfig {
       memory?: string;
       cpus?: string;
       pids_limit?: number;
+      privileged?: boolean;
+      capDrop?: string[];
+      binds?: string[];
     };
   };
 }

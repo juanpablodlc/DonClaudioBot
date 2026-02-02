@@ -1,0 +1,15 @@
+# DonClaudioBot log rotation
+# Rotates logs weekly, keeps 4 weeks of history
+# Copy this to /etc/logrotate.d/don-claudio
+
+/var/log/don-claudio-reconciliation.log
+/var/log/don-claudio-oauth.log
+/var/log/don-claudio-backup.log {
+    weekly
+    rotate 4
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0644 root root
+}

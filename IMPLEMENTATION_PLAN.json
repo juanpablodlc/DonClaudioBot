@@ -1,6 +1,6 @@
 {
   "project_name": "DonClaudioBot v2",
-  "version": "2.5.0",
+  "version": "2.8.1",
   "last_updated": "2026-02-01",
   "design_notes": {
     "critical_investigation_required": {
@@ -66,6 +66,18 @@
       "COMPLETED 2026-02-01: P1-004 Baileys sidecar (173 LOC, auto-reconnect with exponential backoff 5s→60s)",
       "COMPLETED 2026-02-01: P1-005 OAuth monitoring (118 LOC, 90-day token expiry check)",
       "VERIFIED 2026-02-01: All P1 tasks (P1-001 through P1-005) now complete"
+    ],
+    "changes_from_v2.5.0": [
+      "COMPLETED 2026-02-01: P1-006 state reconciliation job (167 LOC, orphaned agents/DB records/invalid bindings/stale states detection and cleanup)"
+    ],
+    "changes_from_v2.6.0": [
+      "COMPLETED 2026-02-01: P2-001 sandbox resource limits (4 LOC, memory: 512m, cpus: 0.5, pids_limit: 100)"
+    ],
+    "changes_from_v2.7.0": [
+      "COMPLETED 2026-02-01: P2-003 Docker sandbox image with gog CLI (7 LOC, node:22-bookworm-slim base)"
+    ],
+    "changes_from_v2.8.0": [
+      "FIXED 2026-02-01: P2-003 gog CLI installation URL - replaced placeholder with official GitHub releases download per OpenClaw docs"
     ]
   },
   "implementation_guidance": {
@@ -848,7 +860,7 @@
     {
       "id": "P1-006",
       "title": "Add state reconciliation job",
-      "status": "pending",
+      "status": "completed",
       "priority": "P1",
       "dependencies": ["P0-003", "P0-005", "P1-005"],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/reconciliation.ts. Implement reconcileStates(): Promise<ReconciliationReport> function that: (1) Reads all agents from openclaw.json agents.list, (2) Reads all records from onboarding_states table, (3) Finds orphanedAgents: agents in config but not in DB, (4) Finds orphanedDbRecords: DB records with status != 'cancelled' but agent not in config, (5) Finds staleStates: records with updated_at < 24h ago and status in ['new', 'pending_welcome', 'collecting_info'], (6) Returns ReconciliationReport interface {orphanedAgents: string[], orphanedDbRecords: string[], invalidBindings: string[], staleStates: string[]}. Implement cleanupOrphans(report) that: deletes orphaned agents via 'openclaw agents remove', marks orphaned DB records as 'cancelled'. Export functions. Run via cron hourly.",
@@ -872,22 +884,27 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'reconcileStates' src/services/reconciliation.ts && grep -q 'ReconciliationReport' src/services/reconciliation.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'orphanedAgents' src/services/reconciliation.ts && grep -q 'staleStates' src/services/reconciliation.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'cleanupOrphans' src/services/reconciliation.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "Reconciliation service created at onboarding/src/services/reconciliation.ts (167 LOC). reconcileStates() scans config and DB to find orphaned agents, orphaned DB records, invalid bindings, and stale states (>24h in incomplete status). cleanupOrphans() deletes orphaned agents via 'openclaw agents remove', marks orphaned records as 'cancelled', removes invalid bindings. All actions logged with [reconciliation] prefix."
     },
     {
       "id": "P2-001",
       "title": "Define sandbox resource limits",
-      "status": "pending",
+      "status": "completed",
       "priority": "P2",
       "dependencies": ["P0-006"],
       "description": "Update /Users/jp/CodingProjects/DonClaudioBot/onboarding/src/services/agent-creator.ts sandbox config to add Docker resource limits. In agentConfig.sandbox.docker, add: (1) memory: '512m' (max 512MB RAM per sandbox), (2) cpus: '0.5' (max 50% of one CPU core), (3) pids_limit: 100 (max 100 processes - prevent fork bombs). Keep existing image, network, env, binds, setupCommand. Document limits in comment above config: '// Sandbox resource limits: 512MB RAM, 0.5 CPU, 100 PIDs - sufficient for Node.js + gog CLI, prevents host exhaustion'. These limits prevent sandbox from consuming host resources while allowing gog CLI and basic OAuth operations.",
@@ -910,17 +927,27 @@
       "verification_steps": [
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q \"memory: '512m'\" src/services/agent-creator.ts && grep -q \"cpus: '0.5'\" src/services/agent-creator.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'pids_limit' src/services/agent-creator.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && grep -q 'Sandbox resource limits' src/services/agent-creator.ts",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
+        },
+        {
+          "command": "cd /Users/jp/CodingProjects/DonClaudioBot/onboarding && npx tsc --noEmit",
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "Sandbox resource limits added to agent-creator.ts (4 LOC). memory: '512m', cpus: '0.5', pids_limit: 100 added to agentConfig.sandbox.docker. TypeScript interface updated with optional properties. All verification steps pass."
     },
     {
       "id": "P2-002",
@@ -964,7 +991,7 @@
     {
       "id": "P2-003",
       "title": "Create Docker sandbox image with gog CLI",
-      "status": "pending",
+      "status": "completed",
       "priority": "P2",
       "dependencies": [],
       "description": "Create /Users/jp/CodingProjects/DonClaudioBot/config/sandbox/Dockerfile.sandbox for building sandbox image with gog CLI pre-installed (DP4 resolution). FROM node:22-bookworm-slim. RUN apt-get update && apt-get install -y curl git jq. RUN curl -fsSL https://raw.githubusercontent.com/example/gog/main/install.sh | sh. WORKDIR /home/node. ENV PATH=/home/node/.local/bin:$PATH. COPY --chown=node:node config/agents/dedicated/ /home/node/workspace/. ENTRYPOINT [\"node\"]. Build with: docker build -f config/sandbox/Dockerfile.sandbox -t openclaw-sandbox:bookworm-slim config/sandbox/. This image includes gog CLI for Google OAuth operations inside sandboxed agents.",
@@ -988,13 +1015,17 @@
       "verification_steps": [
         {
           "command": "grep -q 'FROM node:22-bookworm-slim' /Users/jp/CodingProjects/DonClaudioBot/config/sandbox/Dockerfile.sandbox && grep -q 'gog' /Users/jp/CodingProjects/DonClaudioBot/config/sandbox/Dockerfile.sandbox",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         },
         {
           "command": "grep -q 'WORKDIR /home/node' /Users/jp/CodingProjects/DonClaudioBot/config/sandbox/Dockerfile.sandbox",
-          "expected_output": "exit code 0"
+          "expected_output": "exit code 0",
+          "status": "passed"
         }
-      ]
+      ],
+      "completed_at": "2026-02-01",
+      "comments": "Dockerfile.sandbox created at config/sandbox/Dockerfile.sandbox (8 LOC). Uses node:22-bookworm-slim base image, installs curl/git/jq, installs gog CLI via official GitHub releases (steipete/gog), sets PATH for ~/.local/bin, copies dedicated agent templates, runs as node user. POST-AUDIT FIX: Replaced placeholder URL with official download from https://github.com/steipete/gog/releases/latest/download/gog_Linux_x86_64.tar.gz per OpenClaw GCP docs pattern."
     },
     {
       "id": "P2-004",

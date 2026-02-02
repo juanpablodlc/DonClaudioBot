@@ -30,6 +30,9 @@ export interface AgentConfig {
       image: string;
       env: Record<string, string>;
       network: string;
+      memory?: string;
+      cpus?: string;
+      pids_limit?: number;
     };
   };
 }
@@ -92,6 +95,10 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
             GOG_CONFIG_DIR: `/home/node/.gog/plus_${phoneNumber.replace('+', '')}`,
           },
           network: 'bridge',
+          // Sandbox resource limits: 512MB RAM, 0.5 CPU, 100 PIDs - sufficient for Node.js + gog CLI, prevents host exhaustion
+          memory: '512m',
+          cpus: '0.5',
+          pids_limit: 100,
         },
       },
     };

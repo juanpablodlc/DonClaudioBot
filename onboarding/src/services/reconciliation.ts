@@ -3,8 +3,8 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { readConfig } from './config-writer.js';
-import { getState, updateState, initDatabase } from './state-manager.js';
+import { readConfig, writeConfigAtomic } from './config-writer.js';
+import { updateState, initDatabase } from './state-manager.js';
 import Database from 'better-sqlite3';
 
 const execFileAsync = promisify(execFile);
@@ -21,6 +21,7 @@ const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 export interface ReconciliationReport {
   orphanedAgents: string[];      // Agent IDs in config but NOT in DB
   orphanedDbRecords: string[];    // Phone numbers in DB (non-cancelled) but agent NOT in config
+  invalidBindings: string[];      // Bindings to non-existent agents
   staleStates: string[];          // Phone numbers with stale states (>24h, non-terminal status)
 }
 
@@ -32,12 +33,14 @@ export async function reconcileStates(): Promise<ReconciliationReport> {
   const report: ReconciliationReport = {
     orphanedAgents: [],
     orphanedDbRecords: [],
+    invalidBindings: [],
     staleStates: [],
   };
 
-  // Read OpenClaw config to get all agent IDs
+  // Read OpenClaw config to get all agent IDs and bindings
   const config = readConfig();
   const configAgentIds = new Set(config.agents.list.map(agent => agent.id));
+  const boundAgentIds = new Set(config.bindings.map(b => b.agentId));
 
   // Query all onboarding states from database
   const db = initDatabaseForQuery();
@@ -57,6 +60,14 @@ export async function reconcileStates(): Promise<ReconciliationReport> {
     if (!dbAgentIds.has(agentId)) {
       report.orphanedAgents.push(agentId);
       console.log(`[reconciliation] Found orphaned agent: ${agentId}`);
+    }
+  }
+
+  // Detect invalid bindings: bindings to non-existent agents
+  for (const agentId of boundAgentIds) {
+    if (!configAgentIds.has(agentId)) {
+      report.invalidBindings.push(agentId);
+      console.log(`[reconciliation] Found invalid binding to agent: ${agentId}`);
     }
   }
 
@@ -92,13 +103,15 @@ export async function reconcileStates(): Promise<ReconciliationReport> {
  * Clean up orphaned agents and DB records
  * - Removes orphaned agents via OpenClaw CLI
  * - Marks orphaned DB records as cancelled
+ * - Removes invalid bindings from config
+ * - Cancels stale states
  */
 export async function cleanupOrphans(report: ReconciliationReport): Promise<void> {
   // Clean up orphaned agents
   for (const agentId of report.orphanedAgents) {
     try {
       console.log(`[reconciliation] Removing orphaned agent: ${agentId}`);
-      await execFileAsync('openclaw', ['agents', 'delete', agentId], { timeout: CLI_TIMEOUT });
+      await execFileAsync('openclaw', ['agents', 'remove', agentId], { timeout: CLI_TIMEOUT });
       console.log(`[reconciliation] Successfully removed agent: ${agentId}`);
     } catch (error) {
       console.error(`[reconciliation] Failed to remove agent ${agentId}:`, error);
@@ -113,6 +126,28 @@ export async function cleanupOrphans(report: ReconciliationReport): Promise<void
       console.log(`[reconciliation] Successfully cancelled record: ${phone}`);
     } catch (error) {
       console.error(`[reconciliation] Failed to cancel record ${phone}:`, error);
+    }
+  }
+
+  // Remove invalid bindings from config
+  if (report.invalidBindings.length > 0) {
+    const config = readConfig();
+    const invalidAgentIds = new Set(report.invalidBindings);
+    const originalCount = config.bindings.length;
+    config.bindings = config.bindings.filter(b => !invalidAgentIds.has(b.agentId));
+    const removedCount = originalCount - config.bindings.length;
+    await writeConfigAtomic(config);
+    console.log(`[reconciliation] Removed ${removedCount} invalid bindings from config`);
+  }
+
+  // Cancel stale states for fresh onboarding
+  for (const phone of report.staleStates) {
+    try {
+      console.log(`[reconciliation] Cancelling stale state: ${phone}`);
+      updateState(phone, { status: 'cancelled' });
+      console.log(`[reconciliation] Successfully cancelled stale state: ${phone}`);
+    } catch (error) {
+      console.error(`[reconciliation] Failed to cancel stale state ${phone}:`, error);
     }
   }
 }

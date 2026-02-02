@@ -1,4 +1,4 @@
-import { E164PhoneSchema } from './validation';
+import { E164PhoneSchema } from './validation.js';
 
 /**
  * Normalize a raw phone number to E.164 format.

@@ -44,13 +44,13 @@ export interface AgentConfig {
 }
 
 /**
- * Verify OpenClaw CLI is installed before any operations
+ * Verify OpenClaw CLI is available (via npx)
  */
 async function verifyOpenClawInstalled(): Promise<void> {
   try {
-    await execFileAsync('openclaw', ['--version'], { timeout: 5000 });
+    await execFileAsync('npx', ['openclaw', '--version'], { timeout: 5000 });
   } catch {
-    throw new Error('OpenClaw CLI not found. Install with: npm install -g openclaw');
+    throw new Error('OpenClaw CLI not found. Ensure openclaw is installed as a dependency');
   }
 }
 
@@ -76,8 +76,8 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
   let backupPath: string | null = null;
 
   try {
-    // Step 1: Create agent via CLI (using execFile to prevent command injection)
-    await execFileAsync('openclaw', ['agents', 'add', agentId], { timeout: CLI_TIMEOUT });
+    // Step 1: Create agent via CLI (using npx to run from node_modules)
+    await execFileAsync('npx', ['openclaw', 'agents', 'add', agentId], { timeout: CLI_TIMEOUT });
     agentCreated = true;
 
     // Step 2: Backup config
@@ -136,7 +136,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
 
     if (agentCreated) {
       try {
-        await execFileAsync('openclaw', ['agents', 'remove', agentId], { timeout: CLI_TIMEOUT });
+        await execFileAsync('npx', ['openclaw', 'agents', 'remove', agentId], { timeout: CLI_TIMEOUT });
       } catch (removeError) {
         console.error(`[agent-creator] Failed to remove agent ${agentId}:`, removeError);
       }

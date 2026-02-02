@@ -3,11 +3,10 @@
 
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Schema path: use source file since it's available in container
+const SCHEMA_PATH = join(process.cwd(), 'onboarding', 'src', 'db', 'schema.sql');
 
 // DB path: /home/node/.openclaw/onboarding.db or env override
 const DB_PATH_BASE = process.env.OPENCLAW_STATE_DIR || '/home/node/.openclaw';
@@ -37,8 +36,7 @@ export function initDatabase(): void {
   db = new Database(DB_PATH, { timeout: 5000 });
 
   // Read and execute schema
-  const schemaPath = join(__dirname, '../db/schema.sql');
-  const schema = readFileSync(schemaPath, 'utf-8');
+  const schema = readFileSync(SCHEMA_PATH, 'utf-8');
   db.exec(schema);
 }
 

@@ -1,6 +1,6 @@
 # DonClaudioBot v2 - Architecture Reference
 
-**Version:** 2.11.0 | **Status:** Production Ready | **Updated:** 2026-02-01
+**Version:** 2.14.0 | **Status:** Production Ready | **Updated:** 2026-02-02
 
 ---
 
@@ -11,6 +11,8 @@ DonClaudioBot is a WhatsApp-based multi-user AI assistant service where each use
 **v2 Key Fix:** Create agents with sandbox config FIRST, then do OAuth in that agent's context. OpenClaw is used as an npm dependency (not fork), and agents are created dynamically (no pre-provisioning). Onboarding is a deterministic Node.js service with SQLite state tracking, not LLM-driven instructions.
 
 **Current Status:** 31/31 tasks completed, 59/59 verification steps passed. Total LOC: 1,909 across validation, database, API, infrastructure, observability, OAuth monitoring, maintenance, sandbox, and testing components.
+
+**Key Architecture Change (v2.14.0):** Dual-process launcher runs Gateway via `npx openclaw gateway` (not npm import) and Onboarding via `node dist/index.js`. See "Dual-Process Architecture" section below.
 
 ---
 
@@ -175,6 +177,44 @@ Hetzner VPS
 ```
 
 **Deployment Model:** Code updates don't affect WhatsApp auth (stored in named volume `don-claudio-state`). Never run `docker volume rm don-claudio-state` unless re-authenticating.
+
+---
+
+## Dual-Process Architecture
+
+The container runs **TWO independent processes** via `launcher.js` (177 LOC):
+
+### Process 1: OpenClaw Gateway
+- **Command:** `npx openclaw gateway --bind lan --port 18789`
+- **Purpose:** Handles WhatsApp routing and multi-agent sessions
+- **Log prefix:** `[gateway]`
+
+### Process 2: Onboarding Service
+- **Command:** `node /app/onboarding/dist/index.js`
+- **Purpose:** Creates agents via OpenClaw API, manages SQLite state
+- **Log prefix:** `[onboarding]`
+
+### Design Rationale
+
+| Decision | Reason |
+|----------|--------|
+| **npx instead of global install** | Avoids version pinning issues — always runs the version in package.json |
+| **Independent processes** | Enables debugging without restarting entire stack |
+| **Prefixed logs** | Easy debugging — grep for `[gateway]` or `[onboarding]` |
+| **Auto-restart (max 3)** | Transient failures recover automatically, persistent failures alert |
+
+### Communication
+- Gateway and Onboarding communicate via **shared state** in `/home/node/.openclaw/`
+- Gateway watches `openclaw.json` via `fs.watch()` — auto-reloads on changes
+- No inter-process RPC — both read/write same config file
+
+### Failure Handling
+| Scenario | Behavior |
+|----------|----------|
+| Gateway crashes | Auto-restart (max 3), then fatal exit |
+| Onboarding crashes | Auto-restart (max 3), then fatal exit |
+| SIGTERM/SIGINT | Graceful shutdown both (5s timeout, then SIGKILL) |
+| Uncaught exception | Log and fatal exit with code 1 |
 
 ### Technology Stack
 
@@ -429,6 +469,8 @@ DonClaudioBot/
 **Gotchas:**
 - OAuth must happen AFTER agent creation (timing bug from v1)
 - Don't share `GOG_KEYRING_PASSWORD` between agents
-- Host path `/root/.openclaw/` mounts to container `/root/.openclaw/`
+- Host path `/root/.openclaw/` mounts to container `/home/node/.openclaw/` (non-root user)
 - Use `execFile()` not `exec()` for CLI calls (command injection prevention)
 - Never run `docker volume rm don-claudio-state` unless re-authenticating WhatsApp
+- OpenClaw CLI runs via `npx openclaw` (not global install) — always uses package.json version
+- ES module imports require `.js` extensions (e.g., `import { foo } from './bar.js'`)

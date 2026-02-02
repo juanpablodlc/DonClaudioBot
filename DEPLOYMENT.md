@@ -207,7 +207,7 @@ ssh root@135.181.93.227
 cd /root/don-claudio-bot
 
 # Edit config in volume
-docker exec -it don-claudio-bot nano /root/.openclaw/openclaw.json
+docker exec -it don-claudio-bot nano /home/node/.openclaw/openclaw.json
 
 # Reload config (no restart needed)
 docker exec -it don-claudio-bot npx openclaw gateway reload
@@ -363,7 +363,7 @@ docker compose -f docker/docker-compose.yml up -d
 ssh root@135.181.93.227
 
 # Check if auth exists in volume
-docker exec -it don-claudio-bot ls -la /root/.openclaw/credentials/whatsapp/
+docker exec -it don-claudio-bot ls -la /home/node/.openclaw/credentials/whatsapp/
 
 # If auth is missing, re-authenticate
 docker exec -it don-claudio-bot npx openclaw channels login

@@ -70,7 +70,7 @@ scripts/
 
 **Isolation:** Each agent has unique `GOG_KEYRING_PASSWORD` and token path. Never share `agentDir`. See ARCHITECTURE_REPORT.md section 7.
 
-**Paths:** Host `/root/.openclaw/` mounts to container `/root/.openclaw/`. See `docker/docker-compose.yml` lines 13-19.
+**Paths:** Host path mounts to container `/home/node/.openclaw/` (non-root user). See `docker/docker-compose.yml` lines 13-19.
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "project": "DonClaudioBot v2",
-  "version": "2.11.0",
-  "last_updated": "2026-02-01",
+  "version": "2.14.0",
+  "last_updated": "2026-02-02",
   "status": "PRODUCTION READY",
   "summary": "31/31 tasks completed, 59/59 verification steps passed",
   "top_10_highlights": [
@@ -41,7 +41,7 @@
     "main_container": {
       "image": "Built from docker/Dockerfile (Node.js 22, Ubuntu Bookworm)",
       "volumes": [
-        "don-claudio-state:/root/.openclaw (WhatsApp auth, database, agent sessions)"
+        "don-claudio-state:/home/node/.openclaw (WhatsApp auth, database, agent sessions)"
       ],
       "security": [
         "user: ${UID:-1000}:${GID:-1000} (non-root appuser, UID/GID configurable via .env)",

@@ -591,7 +591,7 @@
           "status": "pending"
         }
       ],
-      "comments": "FINAL deployment step. Once this passes, WhatsApp authentication can be done via Gateway UI at http://135.181.93.227:18789/. NOTE: Port 18789 is not exposed by default - may need to add SSH tunnel for initial auth."
+      "comments": "FINAL deployment step. Once this passes, WhatsApp authentication can be done via Gateway UI at http://135.181.93.227:18789/. NOTE: Port 18789 IS exposed in docker-compose.yml, but Hetzner firewall may block external access. Use SSH tunnel if needed: ssh -i ~/.ssh/hetzner -N -L 18789:127.0.0.1:18789 root@135.181.93.227"
     },
     {
       "id": "P1-DEPLOY-010",

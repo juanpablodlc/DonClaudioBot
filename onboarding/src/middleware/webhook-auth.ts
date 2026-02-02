@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { logAuthFailure } from '../lib/audit-logger.js';
 
 const HOOK_TOKEN = process.env.HOOK_TOKEN;
 
@@ -11,6 +12,7 @@ export function webhookAuth(req: Request, res: Response, next: NextFunction): vo
 
   // Check authorization header exists and starts with 'Bearer '
   if (!authHeader?.startsWith('Bearer ')) {
+    logAuthFailure(req.ip || 'unknown', 'missing_authorization_header');
     res.status(401).json({ error: 'Missing authorization header' });
     return;
   }
@@ -20,7 +22,7 @@ export function webhookAuth(req: Request, res: Response, next: NextFunction): vo
 
   // Validate token
   if (token !== HOOK_TOKEN) {
-    console.error('[webhook] Failed auth attempt from ' + req.ip);
+    logAuthFailure(req.ip || 'unknown', 'invalid_token');
     res.status(403).json({ error: 'Invalid token' });
     return;
   }

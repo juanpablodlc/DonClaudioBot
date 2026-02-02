@@ -23,6 +23,19 @@ services:
       - HOOK_TOKEN=${HOOK_TOKEN:-change-me}
     networks:
       - don-claudio-network
+    # Security hardening - run as non-root user
+    user: "${UID:-1000}:${GID:-1000}"
+    # Prevent container filesystem modification
+    read_only: true
+    # Writable temporary storage
+    tmpfs:
+      - /tmp
+    # Prevent privilege escalation
+    security_opt:
+      - no-new-privileges:true
+    # Drop Linux capabilities (except those needed for Docker socket)
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s

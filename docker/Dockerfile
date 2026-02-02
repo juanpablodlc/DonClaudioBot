@@ -34,8 +34,11 @@ RUN npm run build
 # Copy config templates
 COPY config ./config
 
-# Create state directory
-RUN mkdir -p /root/.openclaw
+# Create non-root user and state directory
+RUN groupadd -g 1000 appuser && \
+    useradd -r -u 1000 -g appuser appuser && \
+    mkdir -p /root/.openclaw && \
+    chown -R appuser:appuser /root/.openclaw
 
 # Environment
 ENV NODE_ENV=production

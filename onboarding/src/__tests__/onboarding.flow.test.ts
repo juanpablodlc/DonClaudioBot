@@ -10,7 +10,7 @@ vi.mock('../services/agent-creator.js', () => ({
 }));
 
 vi.mock('../services/state-manager.js', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import('../services/state-manager.js')>();
   return {
     ...actual,
     getState: vi.fn(),

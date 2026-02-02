@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, renameSync, copyFileSync, constants as fsC
 import { dirname } from 'path';
 import lockfile from 'proper-lockfile';
 import JSON5 from 'json5';
+import { logConfigChange } from '../lib/audit-logger.js';
 
 // OpenClaw config path
 export function getConfigPath(): string {
@@ -37,6 +38,9 @@ export async function writeConfigAtomic(config: OpenClawConfig): Promise<void> {
   } finally {
     await release();
   }
+
+  // Audit log: config updated
+  logConfigChange('update', { path, agentsCount: config.agents.list.length });
 }
 
 // Add agent to config (agents.list + bindings)

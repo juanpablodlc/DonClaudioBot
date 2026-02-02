@@ -5,6 +5,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomBytes } from 'crypto';
 import { E164PhoneSchema } from '../lib/validation.js';
+import { logAgentCreation } from '../lib/audit-logger.js';
+import { validateSandboxConfig } from '../lib/sandbox-validator.js';
 import type { AgentConfig as ConfigWriterAgentConfig } from './config-writer.js';
 
 const execFileAsync = promisify(execFile);
@@ -103,12 +105,18 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
       },
     };
 
+    // Step 3: Validate sandbox config before adding (security check)
+    validateSandboxConfig(agentConfig);
+
     const { addAgentToConfig } = await import('./config-writer.js');
     await addAgentToConfig(agentConfig as unknown as ConfigWriterAgentConfig, phoneNumber);
     configUpdated = true;
 
     // Step 4: Reload gateway (using execFile to prevent command injection)
     await execFileAsync('openclaw', ['gateway', 'reload'], { timeout: CLI_TIMEOUT });
+
+    // Audit log: agent created successfully
+    logAgentCreation(phoneNumber, agentId, true);
 
     return agentId;
   } catch (error) {

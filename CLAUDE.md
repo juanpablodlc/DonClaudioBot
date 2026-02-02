@@ -76,7 +76,7 @@ scripts/
 
 ## Tools
 
-**MCP: QMD** — Search Clawd4All v1 context: `mcp__qmd__vsearch(query="...", minScore=0.8)` (semantic) or `mcp__qmd__search(query="...")` (keyword).
+**MCP: QMD** — Search Clawd4All v1 context: `mcp__qmd__vsearch(query="...", minScore=0.8)` (semantic) or `mcp__qmd__search(query="...")` (keyword). Search for narrow/focused terms as this is expensive in CPU and memory.
 
 **Skill: Karpathy** — Use before writing code to avoid over-engineering, ensure surgical changes, and define verifiable success criteria.
 
@@ -140,3 +140,23 @@ docker exec -it don-claudio-bot npx openclaw channels login
 - Point at logs, errors, failing tests -> then resolve them
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
+
+### 7. The Implementation Protocol (Manager Loop)
+**Trigger:** When asked to "implement next task", "work on the project", or "run the loop".
+**Role:** You act as the **Manager/Verifier**. Do not write code yourself.
+
+**Procedure:**
+1.  **Read State:** Load IMPLEMENTATION_PLAN.json
+2.  **Select Task:** specific the next `pending` task by `priority` (P0 > P1) and check `dependencies`.
+3.  **DELEGATE (Sub-agent):** Instruct a Coder sub-agent to:
+    * Load karpathy skill
+    * Read relevant sections of `ARCHITECTURE_REPORT.md` and the JSON task context.
+    * *Strict Constraint:* Use QMD MCP for referencing OpenClaw docs. Search for narrow/focused terms as this is expensive in CPU and memory.
+    * Execute the task with surgical changes (Simplicity First).
+    * Report: File path, Lines of Code (LOC), and Verification output.
+4.  **VERIFY (Manager):**
+    * Audit the sub-agent's work against the "Success Criteria" in the JSON.
+    * Run the `verification_steps` defined in the JSON task.
+5.  **UPDATE:**
+    * If and **ONLY IF** verification passes: Update `IMPLEMENTATION_PLAN.json` status to `completed`.
+    * If failed: Document the failure in the JSON or request a retry. update 'lessons.md' with the pattern if applicable

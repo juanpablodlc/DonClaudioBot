@@ -639,9 +639,9 @@
       "P1": 1
     },
     "by_status": {
-      "pending": 3,
+      "pending": 2,
       "in_progress": 0,
-      "completed": 8
+      "completed": 9
     },
     "dependencies": [
       "P0-DEPLOY-001 (Verify Prerequisites) must pass before any deployment",

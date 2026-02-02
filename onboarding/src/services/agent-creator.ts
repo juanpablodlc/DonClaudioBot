@@ -88,8 +88,8 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
     const agentConfig: AgentConfig = {
       id: agentId,
       name: 'User Agent',
-      workspace: `~/.openclaw/workspace-${agentId}`,
-      agentDir: `~/.openclaw/agents/${agentId}/agent`,
+      workspace: `${process.env.OPENCLAW_STATE_DIR || '/home/node/.openclaw'}/workspace-${agentId}`,
+      agentDir: `${process.env.OPENCLAW_STATE_DIR || '/home/node/.openclaw'}/agents/${agentId}/agent`,
       sandbox: {
         mode: 'all',
         scope: 'agent',
@@ -117,8 +117,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
     await addAgentToConfig(agentConfig as unknown as ConfigWriterAgentConfig, phoneNumber);
     configUpdated = true;
 
-    // Step 4: Reload gateway (using execFile to prevent command injection)
-    await execFileAsync('openclaw', ['gateway', 'reload'], { timeout: CLI_TIMEOUT });
+    // Gateway auto-reloads via fs.watch() - no manual reload needed for in-process Gateway
 
     // Audit log: agent created successfully
     logAgentCreation(phoneNumber, agentId, true);

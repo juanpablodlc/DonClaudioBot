@@ -1,43 +1,36 @@
 #!/bin/bash
 set -e
 
-BACKUP_VOLUME="don-claudio-state-backup"
-SOURCE_VOLUME="don-claudio-state"
+# Backup script for don-claudio-state Docker volume
+# Creates timestamped backups in /root/don-claudio-bot/backups/
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
+BACKUP_DIR="$SCRIPT_DIR/backups"
+VOLUME_NAME="don-claudio-state"
+
+# Ensure backup directory exists
+mkdir -p "$BACKUP_DIR"
+
+# Generate timestamp
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-BACKUP_FILE="backup-${TIMESTAMP}.tar.gz"
+BACKUP_FILE="$BACKUP_DIR/$VOLUME_NAME-$TIMESTAMP.tar.gz"
 
-echo "=== Starting backup of ${SOURCE_VOLUME} ==="
+echo "Starting backup of $VOLUME_NAME..."
 
-# Create backup volume if it doesn't exist
-if ! docker volume inspect "${BACKUP_VOLUME}" &>/dev/null; then
-  echo "Creating backup volume: ${BACKUP_VOLUME}"
-  docker volume create "${BACKUP_VOLUME}"
-else
-  echo "Backup volume ${BACKUP_VOLUME} already exists"
-fi
+# Stop containers gracefully
+echo "Stopping containers..."
+cd "$SCRIPT_DIR/docker"
+docker compose down
 
-# Run backup container to create tarball
-echo "Creating backup: ${BACKUP_FILE}"
+# Create backup using Alpine container
+echo "Creating backup archive..."
 docker run --rm \
-  -v "${SOURCE_VOLUME}:/from" \
-  -v "${BACKUP_VOLUME}:/to" \
-  alpine:latest \
-  tar czf "/to/${BACKUP_FILE}" -C /from .
+  -v "$VOLUME_NAME":/data \
+  -v "$BACKUP_DIR":/backup \
+  alpine tar czf "/backup/$VOLUME_NAME-$TIMESTAMP.tar.gz" -C /data .
 
-# Retain last 7 backups, delete older ones
-echo "Cleaning up old backups (retaining last 7)..."
-docker run --rm \
-  -v "${BACKUP_VOLUME}:/data" \
-  alpine:latest \
-  sh -c "cd /data && ls -t backup-*.tar.gz 2>/dev/null | tail -n +8 | xargs -r rm -f"
+# Restart containers
+echo "Restarting containers..."
+docker compose up -d
 
-# List current backups
-echo ""
-echo "=== Current backups in ${BACKUP_VOLUME} ==="
-docker run --rm \
-  -v "${BACKUP_VOLUME}:/data" \
-  alpine:latest \
-  ls -lh /data
-
-echo ""
-echo "=== Backup complete: ${BACKUP_FILE} ==="
+echo "Backup completed: $BACKUP_FILE"

@@ -13,7 +13,7 @@ services:
     volumes:
       # CRITICAL: This volume preserves WhatsApp auth and all state across deployments
       # When you update code, this volume stays attached - WhatsApp stays authenticated
-      - don-claudio-state:/root/.openclaw
+      - don-claudio-state:/home/node/.openclaw
 
       # Docker socket for sandbox containers
       - /var/run/docker.sock:/var/run/docker.sock

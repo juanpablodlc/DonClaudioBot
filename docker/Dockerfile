@@ -24,6 +24,9 @@ COPY onboarding/package*.json ./onboarding/
 RUN npm ci --production
 RUN cd onboarding && npm ci --production
 
+# Install OpenClaw CLI globally
+RUN npm install -g openclaw@latest && openclaw --version
+
 # Copy source code
 COPY onboarding/src ./onboarding/src
 COPY tsconfig.json ./
@@ -37,12 +40,12 @@ COPY config ./config
 # Create non-root user and state directory
 RUN groupadd -g 1000 appuser && \
     useradd -r -u 1000 -g appuser appuser && \
-    mkdir -p /root/.openclaw && \
-    chown -R appuser:appuser /root/.openclaw
+    mkdir -p /home/node/.openclaw && \
+    chown -R appuser:appuser /home/node/.openclaw
 
 # Environment
 ENV NODE_ENV=production
-ENV OPENCLAW_STATE_DIR=/root/.openclaw
+ENV OPENCLAW_STATE_DIR=/home/node/.openclaw
 
 # Expose ports
 EXPOSE 3000 18789

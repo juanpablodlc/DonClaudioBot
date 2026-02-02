@@ -9,10 +9,10 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// DB path: ~/.openclaw/onboarding.db or env override
-const DB_PATH = process.env.OPENCLAW_STATE_DIR
-  ? `${process.env.OPENCLAW_STATE_DIR}/onboarding.db`
-  : `${process.env.HOME || '~'}/.openclaw/onboarding.db`;
+// DB path: /home/node/.openclaw/onboarding.db or env override
+const DB_PATH_BASE = process.env.OPENCLAW_STATE_DIR || '/home/node/.openclaw';
+// DB path: /home/node/.openclaw/onboarding.db or env override
+export const DB_PATH = `${DB_PATH_BASE}/onboarding.db`;
 
 let db: Database.Database | null = null;
 

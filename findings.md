@@ -57,6 +57,15 @@
   - `onboarding/src/lib/audit-logger.ts`: Added `OPENCLAW_GATEWAY_TOKEN` to sensitive keys list
 - **Verification:** 32 QMD searches confirm `OPENCLAW_GATEWAY_TOKEN` is the standard; 0 matches for `GATEWAY_TOKEN` in OpenClaw docs
 
+**ADDITIONAL FIX (2026-02-03): Template Schema Issues**
+- Template had `$schema` key that OpenClaw doesn't recognize (caused validation failure)
+- Template had wrong `gateway.bind` format: `"ws://127.0.0.1:18789"` instead of `"lan"`
+- **Root cause:** OpenClaw config uses JSON5 and expects specific values for `gateway.bind`:
+  - `"lan"` - bind to all interfaces (0.0.0.0)
+  - `"loopback"` or omit - bind to 127.0.0.1 only
+  - `"tailnet"` - bind to Tailscale
+- **Fix applied:** Removed `$schema` key, changed `gateway.bind` to `"lan"`
+
 **Critical Discovery - OpenClaw Doctor:**
 - `openclaw doctor --fix` can migrate configs from old schema to new schema
 - Creates backup at `~/.openclaw/openclaw.json.bak`

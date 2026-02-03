@@ -5,6 +5,37 @@
   WHEN: Update after completing each phase or encountering errors. More detailed than task_plan.md.
 -->
 
+## Session: 2026-02-03 (Fresh Volume Start - SUCCESS)
+
+**Timeline of events:**
+1. User requested: Approach #1 (Fresh Volume Start)
+2. SSH'd to Hetzner, stopped container, destroyed corrupted volume
+3. Deployed with fresh volume
+4. Gateway failed to start - no config file
+5. Ran `openclaw setup` to create initial config
+6. Copied template but Gateway failed with:
+   - "Unrecognized key: '$schema'"
+   - "gateway.bind: Invalid input" (was `"ws://127.0.0.1:18789"`, should be `"lan"`)
+7. Fixed template: removed `$schema`, changed `gateway.bind` to `"lan"`
+8. Copied fixed config to container
+9. Gateway still failing - turned out to be a logging issue
+10. Ran `openclaw gateway` directly - discovered Gateway was already running!
+11. **Verified success:**
+    - Gateway running on port 18789 (serving OpenClaw Control UI)
+    - Onboarding healthy on port 3000
+    - Container status: healthy
+
+**Root cause of deployment issues:**
+1. Corrupted volume from previous `openclaw doctor --fix` migration
+2. Template had `$schema` key that OpenClaw doesn't recognize
+3. Template had wrong `gateway.bind` format (WebSocket URL instead of bind mode)
+
+**Files changed:**
+- `config/openclaw.json.template` - Removed `$schema`, changed `gateway.bind` to `"lan"`
+
+**Next steps:**
+- Phase 3: WhatsApp Authentication (set up SSH tunnel, scan QR code)
+
 ## Session: 2026-02-02 (Part 3: Root Cause Identified & Fixed)
 /*
   WHAT: Deep investigation via two parallel agents (planning + code review) to find root cause.

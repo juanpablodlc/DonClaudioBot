@@ -1,12 +1,4 @@
 {
-  "$schema": "https://openclaw.bot/schema.json",
-  "gateway": {
-    "mode": "local",
-    "bind": "ws://127.0.0.1:18789",
-    "auth": {
-      "token": "${OPENCLAW_GATEWAY_TOKEN:-change-me}"
-    }
-  },
   "agents": {
     "defaults": {
       "workspace": "~/.openclaw/workspace",
@@ -47,5 +39,12 @@
     "enabled": true,
     "token": "${HOOK_TOKEN:-change-me}",
     "path": "/hooks"
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "auth": {
+      "token": "${OPENCLAW_GATEWAY_TOKEN:-change-me}"
+    }
   }
 }

@@ -63,11 +63,14 @@ Phase 2
 - [x] Set `gateway.mode = local` via `openclaw config set`
 - [x] Set `gateway.auth.token` via `openclaw config set`
 - [x] **FIXED:** Changed env var from `GATEWAY_TOKEN` to `OPENCLAW_GATEWAY_TOKEN` (root cause found via QMD research)
-- [ ] Verify container running: `ssh -i ~/.ssh/hetzner root@135.181.93.227 'docker ps | grep don-claudio-bot | grep -q Up'`
-- [ ] Check health endpoint: `curl -f -s http://135.181.93.227:3000/health | jq -e '.status == "ok"'`
-- [ ] Verify volume created: `ssh -i ~/.ssh/hetzner root@135.181.93.227 'docker volume ls | grep don-claudio-state'`
-- [ ] Check logs: `ssh root@135.181.93.227 'cd /root/don-claudio-bot && docker compose logs -f --tail=50'`
-- **Status:** **READY TO REDPLOY** - Root cause identified and fixed
+- [x] **FIXED:** Removed `$schema` key and fixed `gateway.bind` format (`"ws://127.0.0.1:18789"` → `"lan"`)
+- [x] Destroyed corrupted volume: `docker volume rm docker_don-claudio-state`
+- [x] Rebuilt and redeployed with fresh volume
+- [x] Verify container running: `ssh -i ~/.ssh/hetzner root@135.181.93.227 'docker ps | grep don-claudio-bot | grep -q Up'` ✅
+- [x] Check health endpoint: `curl -f -s http://135.181.93.227:3000/health | jq -e '.status == "ok"'` ✅
+- [x] Verify volume created: `ssh -i ~/.ssh/hetzner root@135.181.93.227 'docker volume ls | grep don-claudio-state'` ✅
+- [x] Verify Gateway running: `curl -s http://localhost:18789/ | grep OpenClaw` ✅
+- **Status:** **COMPLETE** - Gateway and Onboarding both running successfully
 <!--
   WHAT: Execute the deployment script and verify container is running.
   WHY: This is the main deployment event. Health checks catch failures early.

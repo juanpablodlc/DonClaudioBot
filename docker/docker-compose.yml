@@ -19,7 +19,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - NODE_ENV=production
-      - GATEWAY_TOKEN=${GATEWAY_TOKEN:-change-me}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-change-me}
       - HOOK_TOKEN=${HOOK_TOKEN:-change-me}
     networks:
       - don-claudio-network

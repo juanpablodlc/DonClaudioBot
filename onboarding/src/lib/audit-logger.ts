@@ -75,7 +75,7 @@ export function logAuthFailure(ip: string, reason: string): void {
  */
 function redactSensitive(obj: Record<string, unknown>): Record<string, unknown> {
   const redacted: Record<string, unknown> = {};
-  const sensitiveKeys = ['HOOK_TOKEN', 'GATEWAY_TOKEN', 'GOG_KEYRING_PASSWORD', 'password', 'token', 'secret'];
+  const sensitiveKeys = ['HOOK_TOKEN', 'GATEWAY_TOKEN', 'OPENCLAW_GATEWAY_TOKEN', 'GOG_KEYRING_PASSWORD', 'password', 'token', 'secret'];
 
   for (const [key, value] of Object.entries(obj)) {
     const lowerKey = key.toLowerCase();

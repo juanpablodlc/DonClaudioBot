@@ -163,7 +163,20 @@
 **Prevention:** For SSH tunnel access, always set `allowInsecureAuth: true`. Prefer Tailscale Serve for production HTTPS.
 **Reference:** QMD `openclaw-reference/web/control-ui.md` (Insecure HTTP section), `openclaw-reference/gateway/security/index.md`
 
-### Pattern 13: `openclaw dashboard` Prints Tokenized URL
+### Pattern 14: OpenClaw Docs Reference Wrong gog CLI URL
+**Symptom:** `curl -L https://github.com/steipete/gog/releases/latest/download/gog_Linux_x86_64.tar.gz` returns "Not Found" (9 bytes, not gzip)
+**Root Cause:** OpenClaw docs (hetzner.md, gcp.md) reference `steipete/gog` repo which doesn't have release artifacts. Actual repo is `steipete/gogcli`.
+**Artifact naming:** `gogcli_${VERSION}_linux_amd64.tar.gz` (not `gog_Linux_x86_64.tar.gz`)
+**Binary name inside tarball:** `gog` (correct, despite repo being `gogcli`)
+**Fix:** Use `https://github.com/steipete/gogcli/releases/download/v0.9.0/gogcli_0.9.0_linux_amd64.tar.gz`
+**Prevention:** Always verify download URLs return valid content before baking into Dockerfiles. Pin versions for reproducibility.
+
+### Pattern 15: Sandbox ENTRYPOINT is `node` (By Design)
+**Symptom:** `docker run --rm openclaw-sandbox:bookworm-slim gog --version` fails with `SyntaxError: Invalid or unexpected token`
+**Root Cause:** ENTRYPOINT is `["node"]`, so Docker executes `node gog --version` (tries to run ELF binary as JavaScript)
+**Expected behavior:** OpenClaw sandbox uses `node` as entrypoint for tool execution. Direct binary invocation requires `--entrypoint` override.
+**Verification command:** `docker run --rm --entrypoint /usr/local/bin/gog openclaw-sandbox:bookworm-slim --version`
+**Alternative:** `docker run --rm --entrypoint which openclaw-sandbox:bookworm-slim gog` → `/usr/local/bin/gog`
 **Discovery:** `openclaw dashboard` generates the correct tokenized URL with URL-encoded token
 **Use Case:** Headless servers - prints URL instead of opening browser
 **Command:** `docker exec don-claudio-bot npx openclaw dashboard`

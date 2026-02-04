@@ -17,7 +17,7 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-**Phase 3a COMPLETE** → Next: Phase 4 (Sandbox Image Build)
+**Phase 4 COMPLETE** → Next: Phase 5 (Integration Testing)
 
 ## Phases
 <!--
@@ -137,11 +137,15 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
   WHY: Onboarding agent doesn't need sandbox (mode='off'), but dedicated agents do.
   MAPPED FROM: P1-DEPLOY-010
 -->
-- [ ] Verify config/sandbox/Dockerfile.sandbox exists
-- [ ] Build image: `docker build -t openclaw-sandbox:bookworm-slim -f config/sandbox/Dockerfile.sandbox config/sandbox/`
-- [ ] Verify gog CLI: `docker run --rm openclaw-sandbox:bookworm-slim gog --version`
-- [ ] Push to Hetzner if needed (or build on Hetzner directly)
-- **Status:** pending
+- [x] Verify config/sandbox/Dockerfile.sandbox exists
+- [x] Fixed Dockerfile: pinned gog CLI to v0.9.0 from steipete/gogcli (OpenClaw docs reference steipete/gog which 404s)
+- [x] Fixed build-sandbox.sh: proper variable expansion, auto-cd to project root
+- [x] Build image locally (linux/amd64 via buildx): `docker build --platform linux/amd64 -f config/sandbox/Dockerfile.sandbox -t openclaw-sandbox:bookworm-slim .`
+- [x] Build image on Hetzner directly: `docker build -f config/sandbox/Dockerfile.sandbox -t openclaw-sandbox:bookworm-slim .`
+- [x] Verify gog CLI: `docker run --rm --entrypoint /usr/local/bin/gog openclaw-sandbox:bookworm-slim --version` → v0.9.0
+- [x] Verify which gog: `/usr/local/bin/gog`
+- [x] Image size: 495MB (ID: 053b342741af)
+- **Status:** **COMPLETE**
 
 ### Phase 5: Integration Testing
 <!--

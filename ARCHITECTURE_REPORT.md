@@ -220,7 +220,7 @@ The container runs **TWO independent processes** via `launcher.js` (177 LOC):
 
 | Component | Technology | Version/Notes |
 |-----------|-----------|---------------|
-| **Framework** | OpenClaw | Latest via npm (not forked) |
+| **Framework** | OpenClaw | 2026.1.30 (pinned in package.json) |
 | **Runtime** | Node.js | 22+ |
 | **Language** | TypeScript | 5+ |
 | **Database** | SQLite | 3.x (better-sqlite3 package) |
@@ -230,7 +230,7 @@ The container runs **TWO independent processes** via `launcher.js` (177 LOC):
 | **Testing** | Vitest + Supertest | Integration tests |
 | **OAuth Tool** | gog CLI | Installed from GitHub releases |
 
-**Update Strategy:** `npm update openclaw@latest` → rebuild → redeploy (no merge conflicts)
+**Update Strategy:** Bump version in `package.json` → `npm install` → rebuild → redeploy (no merge conflicts)
 
 ---
 

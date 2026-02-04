@@ -5,6 +5,34 @@
   WHEN: Update after completing each phase or encountering errors. More detailed than task_plan.md.
 -->
 
+## Session: 2026-02-04 (Phase 4: Sandbox Image Build)
+
+**Timeline of events:**
+1. Identified Phase 4 (Sandbox Image Build) as next pending phase from task_plan.md
+2. Delegated to Coder subagent with full context (karpathy skill, QMD research, prevention rules)
+3. Agent researched sandbox requirements via QMD MCP
+4. **Key discovery:** OpenClaw docs reference wrong gog CLI URL — `steipete/gog` returns 404, actual repo is `steipete/gogcli`
+5. Fixed Dockerfile.sandbox: pinned gog v0.9.0, correct URL, added ca-certificates
+6. Fixed build-sandbox.sh: proper variable expansion, auto-cd to project root
+7. Built image on Hetzner directly (arm64 Mac → x86_64 server mismatch makes local build impractical)
+8. **Manager verification (independent):**
+   - `docker images openclaw-sandbox:bookworm-slim` → 495MB, ID 053b342741af ✅
+   - `docker run --rm --entrypoint /usr/local/bin/gog openclaw-sandbox:bookworm-slim --version` → v0.9.0 ✅
+   - `docker run --rm --entrypoint which openclaw-sandbox:bookworm-slim gog` → /usr/local/bin/gog ✅
+9. Updated all markdown files: task_plan.md, findings.md, progress.md
+
+**Files changed:**
+- `config/sandbox/Dockerfile.sandbox` — Fixed gog CLI URL, pinned v0.9.0, added ca-certificates
+- `scripts/build-sandbox.sh` — Fixed variable expansion, auto-cd to project root
+- `task_plan.md` — Phase 4 marked COMPLETE, Current Phase updated
+- `findings.md` — Added Patterns 14 (wrong gog URL) and 15 (sandbox ENTRYPOINT quirk)
+- `progress.md` — This session entry + Phase 4 status + reboot check updated
+
+**Next steps:**
+- Phase 5: Integration Testing (webhook endpoint, onboarding flow)
+
+---
+
 ## Session: 2026-02-04 (Z.AI GLM-4.7 Configuration + Docker Pattern Learning)
 
 **Timeline of events:**
@@ -191,11 +219,21 @@
   -
 
 ### Phase 4: Sandbox Image Build
-- **Status:** pending
+- **Status:** **COMPLETE** (2026-02-04)
 - **Actions taken:**
-  -
+  - Researched sandbox requirements via QMD MCP (gog CLI, sandbox image, agent sandbox)
+  - Discovered OpenClaw docs reference wrong gog CLI URL (`steipete/gog` → actual repo is `steipete/gogcli`)
+  - Fixed `config/sandbox/Dockerfile.sandbox`: pinned gog CLI v0.9.0 from correct repo, added ca-certificates, proper apt cleanup
+  - Fixed `scripts/build-sandbox.sh`: proper variable expansion, auto-cd to project root
+  - Built image on Hetzner directly (arm64 local → x86_64 server mismatch)
+  - Verified gog CLI: `v0.9.0 (99d9575 2026-01-22T04:15:12Z)` ✅
+  - Verified binary location: `/usr/local/bin/gog` ✅
+  - Image size: 495MB (ID: 053b342741af)
 - **Files created/modified:**
-  -
+  - `config/sandbox/Dockerfile.sandbox` (25 lines, was 8) — fixed gog URL, added ca-certificates
+  - `scripts/build-sandbox.sh` (15 lines, was 8) — fixed variable expansion, auto-cd
+  - `findings.md` — Added Patterns 14 (wrong gog URL) and 15 (sandbox ENTRYPOINT is node)
+  - `task_plan.md` — Marked Phase 4 complete
 
 ### Phase 5: Integration Testing
 - **Status:** pending
@@ -235,11 +273,11 @@
 -->
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 0 complete (migration), ready to start Phase 1 (Pre-Deployment Verification) |
-| Where am I going? | Phases 1-6 (verify, deploy, auth, sandbox, test, document) |
+| Where am I? | Phase 4 complete, ready for Phase 5 (Integration Testing) |
+| Where am I going? | Phases 5-6 remaining (integration test, documentation & handoff) |
 | What's the goal? | Deploy DonClaudioBot v2 to Hetzner VPS with health verification and sandbox image |
-| What have I learned? | See findings.md - v2 architecture fixes, dual-process launcher, completed infrastructure |
-| What have I done? | Migrated from tasks.md to planning-with-files system; 9/11 deployment tasks already complete |
+| What have I learned? | See findings.md - 15 Docker anti-patterns, gog CLI URL discrepancy, sandbox ENTRYPOINT quirk |
+| What have I done? | Phases 0-4 complete: infra, pre-deploy, deploy, WhatsApp auth, Gateway UI fix, sandbox image built on Hetzner |
 
 ---
 <!--

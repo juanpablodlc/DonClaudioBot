@@ -101,6 +101,15 @@ docker exec -it don-claudio-bot npx openclaw channels login
 
 # Always load and use the Karpathy skill
 
+### 0. Documentation First Rule (MANDATORY)
+- **BEFORE any code change**: Read relevant OpenClaw documentation via QMD MCP
+- **Mandatory QMD searches** for ANY OpenClaw integration work:
+  - Search for all env var names you plan to use
+  - Search for config schema you plan to modify
+  - Search for any CLI commands you plan to run
+- **No assumptions**: If it's not in the docs, don't use it
+- **Timebox**: 15 minutes of research saves 15 deployment attempts
+
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
@@ -116,12 +125,30 @@ docker exec -it don-claudio-bot npx openclaw channels login
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
+- **MANDATORY**: Subagents MUST use QMD MCP for OpenClaw research
 
 ### 3. Self-Improvement Loop
-- After ANY correction from the user: update 'lessons.md' with the pattern
+- After ANY correction from the user: update 'findings.md' with the pattern
 - Write rules for yourself that prevent the same mistake
-- Ruthlessly iterate on these lessons until mistake rate drops
-- Review lessons at session start for relevant project
+- Review findings.md "What Went Wrong" section at session start
+- Ruthlessly iterate on lessons until mistake rate drops
+
+### 2.5. 3-Strike Error Protocol (MANDATORY)
+- **After 3 deployment failures**: STOP deploying immediately
+- **Required actions**:
+  1. Re-read ALL relevant documentation
+  2. Create minimal reproduction locally
+  3. Only resume when root cause is identified
+- **Forbidden**: Circular debugging (fixing your own fixes)
+- **Evidence**: 15 failed deployments = you're in the trap. STOP.
+
+### 2.6. Local Testing Gate (MANDATORY)
+- **Before ANY deployment**: Test locally with Docker Compose
+- **Required verifications**:
+  - docker compose up succeeds
+  - Env vars load correctly (check inside container)
+  - Config validates (npx openclaw config validate)
+- **Only when local passes**: Deploy to Hetzner
 
 ### 4. Verification Before Done
 - Never mark a task complete without proving it works

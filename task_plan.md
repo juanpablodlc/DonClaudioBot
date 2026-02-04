@@ -146,6 +146,9 @@ Phase 2
 3. What is the current GATEWAY_TOKEN value? (Check .env or local environment)
 4. Does the Hetzner server have Docker Compose v2 installed? (verify-prereqs.sh checks this)
 5. **Is Docker daemon running locally?** (Needed for integration-test.sh in Phase 1)
+6. **Have I searched QMD MCP for ALL env vars and config I'm using?** (MANDATORY before deploy)
+7. **Have I validated the template locally?** (npx openclaw config validate)
+8. **Is this my 3rd+ deployment attempt?** (If yes, STOP and follow 3-Strike Protocol)
 
 ## Decisions Made
 <!--
@@ -162,6 +165,64 @@ Phase 2
 | **ENV VAR NAMING:** Use `OPENCLAW_GATEWAY_TOKEN` | OpenClaw standard (32 doc matches) - was using wrong var name |
 | **TEMPLATE FIX:** Update schema only | Changed `gateway.token` → `gateway.auth.token`, kept rest |
 | **STOP at circular debugging** | 3-Strike Error Protocol - pause and reassess approach |
+
+## Prevention Rules
+<!--
+  WHAT: Hard-learned rules that prevent symptom-chasing and circular debugging.
+  WHY: These rules are derived from analysis of 15+ deployment failures.
+  WHEN: Read before ANY deployment or configuration change.
+-->
+
+### Rule 1: Documentation First (Zero Exceptions)
+- **MANDATORY**: Before ANY OpenClaw integration work, search QMD MCP
+- **Required searches**:
+  - All env var names (verify they exist in OpenClaw docs)
+  - Config schema you're modifying
+  - CLI commands you're running
+- **Timebox**: 15 minutes research prevents 15 deployment attempts
+- **Evidence**: `OPENCLAW_GATEWAY_TOKEN` appears 32 times in docs, took 15 attempts to find
+
+### Rule 2: 3-Strike Error Protocol
+- **After 3 deployment failures**: STOP. DO NOT deploy again.
+- **Required actions**:
+  1. Re-read ALL relevant documentation
+  2. Create minimal reproduction locally
+  3. Only resume when root cause is identified
+- **Circular debugging indicators**:
+  - Reverting previous changes
+  - Fixing issues caused by your fixes
+  - Trying 3+ approaches to same error
+- **Evidence**: Attempts 3-9 were circular debugging; real fix was attempt 3 (reverted in attempt 4)
+
+### Rule 3: Local Testing Gate
+- **Before ANY Hetzner deployment**: Test locally with Docker
+- **Required verifications**:
+  - `docker compose up` succeeds
+  - Env vars load correctly
+  - `npx openclaw config validate` passes
+- **Only when local passes**: Deploy to production
+
+### Rule 4: Template Validation Before Deploy
+- **MANDATORY**: Validate template before every deployment
+- **Command**: `npx openclaw config validate config/openclaw.json.template`
+- **Fix errors BEFORE deploying, not after**
+
+### Rule 5: Volume Persistence Awareness
+- **Template changes ≠ Running config changes**
+- **Two options**:
+  1. Fresh volume (loses WhatsApp auth)
+  2. Manual config update via `openclaw config set`
+- **Never assume** template change will apply to existing volume
+
+### Rule 6: Anti-Pattern Recognition
+If you find yourself doing any of these, STOP and reassess:
+- "Just try it and see what happens"
+- "The docs are too long, I'll figure it out"
+- "This should work, the format looks right"
+- "I'll fix it in production"
+- "One more deploy won't hurt"
+
+**These thoughts indicate you're symptom-chasing. Return to Rule 1.**
 
 ## Errors Encountered
 <!--

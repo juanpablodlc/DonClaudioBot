@@ -120,6 +120,56 @@
 **Workaround:** Manual verification via `curl` and `docker exec`
 **Prevention:** Either (a) install jq in deploy script, (b) use native JSON parsing, or (c) accept manual verification
 
+### Pattern 6: Local Port Conflicts with SSH Tunnels
+**Symptom:** SSH tunnel accesses local service instead of remote
+**Root Cause:** User's Mac runs OpenClaw on 18789 (same as Gateway)
+**Fix:** Use different local port: `ssh -N -L 18790:127.0.0.1:18789 root@host` → access at http://127.0.0.1:18790/
+**Prevention:** Check `lsof -i :PORT` before creating tunnels; document local dev ports
+
+### Pattern 7: Status Commands Lie (Trust Filesystem)
+**Symptom:** `openclaw status` showed "WhatsApp linked" but credentials folder was empty
+**Root Cause:** Status caches configuration state, not actual authentication
+**Fix:** Verify filesystem directly: `ls -la /home/node/.openclaw/credentials/whatsapp/default/creds.json`
+**Prevention:** For critical state (auth, credentials), check files FIRST, then trust status
+
+### Pattern 8: Terminal QR Code Works (No Browser Needed)
+**Discovery:** `npx openclaw channels login --channel whatsapp` displays ASCII QR in terminal
+**Benefit:** No SSH tunnel needed, no browser, scriptable
+**Command:** `ssh root@host 'docker exec container npx openclaw channels login --channel whatsapp'`
+
+### Pattern 9: Non-Interactive SSH Needs No `-it`
+**Issue:** `ssh 'docker exec -it container cmd'` fails with "input device not a TTY"
+**Fix:** Remove `-it`: `ssh 'docker exec container cmd'` (works for QR display)
+
+### Pattern 10: WhatsApp Code 515 = Success (Not Error)
+**Observation:** After QR scan: "WhatsApp asked for a restart after pairing (code 515); creds are saved"
+**Meaning:** Normal Baileys behavior - connection restarts to establish persistent session
+**Files created:** `creds.json`, `creds.json.bak`, 100+ `pre-key-*.json` files
+
+### Pattern 11: Non-Loopback Bind Requires Explicit Auth Mode
+**Symptom:** Gateway UI shows "unauthorized: gateway token mismatch" even with correct token
+**Root Cause:** `gateway.bind: "lan"` requires `gateway.auth.mode: "token"` to be explicitly set
+**Our Setup:**
+- Config had `gateway.auth.token` set correctly
+- But `gateway.auth.mode` was missing (defaults don't apply for non-loopback)
+**Fix:** `openclaw config set gateway.auth.mode token`
+**Prevention:** When using `gateway.bind: "lan"`, ALWAYS set `gateway.auth.mode` explicitly
+
+### Pattern 12: SSH Tunnel + HTTP = No Device Identity (WebCrypto Blocked)
+**Symptom:** Control UI fails with "connect failed" (code 4008) after token_mismatch
+**Root Cause:** SSH tunnel serves HTTP (not HTTPS). Browser non-secure context blocks WebCrypto API, preventing device identity generation. Gateway requires device identity by default.
+**Fix:** `openclaw config set gateway.controlUi.allowInsecureAuth true`
+**Trade-off:** Security downgrade - disables device identity/pairing for Control UI. Acceptable for SSH-tunneled access since tunnel provides transport security.
+**Prevention:** For SSH tunnel access, always set `allowInsecureAuth: true`. Prefer Tailscale Serve for production HTTPS.
+**Reference:** QMD `openclaw-reference/web/control-ui.md` (Insecure HTTP section), `openclaw-reference/gateway/security/index.md`
+
+### Pattern 13: `openclaw dashboard` Prints Tokenized URL
+**Discovery:** `openclaw dashboard` generates the correct tokenized URL with URL-encoded token
+**Use Case:** Headless servers - prints URL instead of opening browser
+**Command:** `docker exec don-claudio-bot npx openclaw dashboard`
+**Output:** `http://127.0.0.1:18789/?token=<url-encoded-token>`
+**Prevention:** Always use `openclaw dashboard` to get the correct access URL instead of manually constructing it
+
 ---
 
 ## Docker Deployment Checklist (Anti-Pattern Prevention)

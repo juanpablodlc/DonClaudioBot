@@ -17,7 +17,7 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-Phase 2
+**Phase 3a COMPLETE** → Next: Phase 4 (Sandbox Image Build)
 
 ## Phases
 <!--
@@ -93,13 +93,43 @@ Phase 2
   WHY: Without WhatsApp auth, the service cannot receive messages.
   MAPPED FROM: P0-DEPLOY-009 post_deployment_steps
 -->
-- [ ] Set up SSH tunnel for Gateway UI: `ssh -i ~/.ssh/hetzner -N -L 18789:127.0.0.1:18789 root@135.181.93.227`
-- [ ] Open browser: http://127.0.0.1:18789/
-- [ ] Authenticate with GATEWAY_TOKEN from .env
-- [ ] Navigate to Channels -> WhatsApp -> Login
-- [ ] Scan QR code with phone
-- [ ] Verify auth files exist: `ls -la /home/node/.openclaw/credentials/whatsapp/`
-- **Status:** pending
+- [x] Set up SSH tunnel for Gateway UI: `ssh -i ~/.ssh/hetzner -N -L 18789:127.0.0.1:18789 root@135.181.93.227`
+- [x] Open browser: http://127.0.0.1:18789/
+- [x] Authenticate with GATEWAY_TOKEN from .env
+- [x] Navigate to Channels -> WhatsApp -> Login
+- [x] Scan QR code with phone
+- [x] Verify auth files exist: `ls -la /home/node/.openclaw/credentials/whatsapp/`
+- **Status:** **COMPLETE** - creds.json created, channel linked (+12062274085)
+
+### Phase 3a: Gateway UI Authentication (COMPLETE)
+<!--
+  WHAT: Fix Gateway Control UI browser authentication - token mismatch error.
+  WHY: Cannot access Gateway UI via browser to manage channels, agents, or config.
+  RESOLVED: 2026-02-04
+-->
+**Root Causes (two compounding issues):**
+1. **Missing `gateway.auth.mode: "token"`** — non-loopback binds (`bind: "lan"`) require explicit auth mode
+2. **Missing `gateway.controlUi.allowInsecureAuth: true`** — SSH tunnel serves HTTP, browser blocks WebCrypto device identity generation in non-secure contexts, causing auth failure even with correct token
+
+**Fix Applied (runtime config via `openclaw config set`, no file changes):**
+```bash
+docker exec don-claudio-bot npx openclaw config set gateway.auth.mode token
+docker exec don-claudio-bot npx openclaw config set gateway.controlUi.allowInsecureAuth true
+docker exec don-claudio-bot npx openclaw config set gateway.auth.token "<token>"
+docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token>"
+```
+
+**Access URL:** `http://127.0.0.1:18790/?token=gGmp9ov9tx54pRmFHOcVeuG%2Fk1OdlR8EYpcnp40PeXY%3D`
+(via SSH tunnel: `ssh -i ~/.ssh/hetzner -N -L 18790:127.0.0.1:18789 root@135.181.93.227`)
+
+**Verification:**
+- [x] Browser UI opens without "disconnected" error
+- [x] `openclaw status` shows Gateway as "reachable" (24ms)
+- [x] `openclaw dashboard` prints tokenized URL correctly
+
+**Status:** **COMPLETE**
+
+---
 
 ### Phase 4: Sandbox Image Build
 <!--

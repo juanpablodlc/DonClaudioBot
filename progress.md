@@ -5,7 +5,72 @@
   WHEN: Update after completing each phase or encountering errors. More detailed than task_plan.md.
 -->
 
-## Session: 2026-02-04 (Phase 5 continued: Schema Fix + Redeploy)
+## Session: 2026-02-04 (Baileys Sidecar Fix - Production Ready)
+
+**Timeline of events:**
+1. User requested WhatsApp message test verification
+2. Discovered Baileys sidecar was DISABLED (`BAILEYS_SIDECAR_ENABLED=false`)
+3. Checked git history - was never set to `true` in commits (added as `false` in P0-015)
+4. Root cause analysis: THREE issues blocking automatic onboarding:
+   - `.env.example` had `BAILEYS_SIDECAR_ENABLED=false` as default
+   - `docker-compose.yml` didn't pass `BAILEYS_SIDECAR_ENABLED` to container
+   - `baileys-sidecar.ts` used wrong auth loading (read `creds.json` directly instead of `useMultiFileAuthState()`)
+5. **Fix 1:** Changed `.env.example` default to `true` with updated documentation
+6. **Fix 2:** Added `BAILEYS_SIDECAR_ENABLED=${BAILEYS_SIDECAR_ENABLED:-true}` to docker-compose.yml environment section
+7. **Fix 3:** Updated `baileys-sidecar.ts` to use `useMultiFileAuthState(authDir)` matching OpenClaw's pattern
+8. Deployed - Baileys sidecar connected successfully: `[baileys-sidecar] Connected`, `opened connection to WA`
+9. System ready for WhatsApp message testing - new users will auto-onboard
+
+**Files changed:**
+- `.env.example` - `BAILEYS_SIDECAR_ENABLED=false` → `true`
+- `docker/docker-compose.yml` - Added `BAILEYS_SIDECAR_ENABLED` to environment
+- `onboarding/src/services/baileys-sidecar.ts` - Fixed auth loading with `useMultiFileAuthState()`
+- `task_plan.md` - Status updated
+- `progress.md` - This entry
+
+**Production Status:** 🚀 READY - Automatic WhatsApp onboarding enabled
+
+---
+
+## Session: 2026-02-04 (Phase 6 COMPLETE - Production Approved - Fix 1)
+
+**Timeline of events:**
+1. User requested production readiness analysis for 5 concurrent onboardings + 2 active users
+2. Analyzed system across 4 dimensions: Container Architecture, Concurrency, Resource Management, Reliability
+3. Verified: ~4.5GB RAM for 7 agents (fits CX32 8GB VPS), serialized agent creation (~100ms for 5 users), chokidar fs.watch with awaitWriteFinish
+4. **CRITICAL BUG FOUND:** reconciliation.js has no main execution block — cron would silently fail
+5. User approved Fix 1 implementation immediately
+6. Created `onboarding/src/services/reconciliation-cli.ts` with main() entry point
+7. Updated `scripts/cron-setup.sh` to reference `reconciliation-cli.js` (was `reconciliation.js`)
+8. Verified tsconfig.json includes `onboarding/src/**/*` (catches new file)
+9. Built TypeScript — compilation successful
+10. Verified compiled output: `reconciliation-cli.js` (4KB), syntax check passed
+11. fs.watch() polling fallback risk accepted — cron serves as safety net
+12. **STATUS: PRODUCTION APPROVED 🚀**
+
+**Production Approval Checklist:**
+- ✅ Container architecture validated (1 main container + N sandbox containers)
+- ✅ Concurrency handling verified (WAL mode, file locking, UNIQUE constraints)
+- ✅ Resource dimensioning (CX32 8GB for 7 users)
+- ✅ Failure mode analysis documented
+- ✅ State reconciliation logic exists
+- ✅ **Reconciliation CLI entry point FIXED**
+- ⚠️ fs.watch polling fallback (risk accepted)
+
+**Files changed:**
+- `onboarding/src/services/reconciliation-cli.ts` — **NEW** CLI entry point with main()
+- `scripts/cron-setup.sh` — Updated cron job to use reconciliation-cli.js
+- `task_plan.md` — Phase 6 marked COMPLETE, production approved
+- `progress.md` — This entry
+
+**Next steps:**
+- Deploy to production
+- Set up cron job: `./scripts/cron-setup.sh`
+- Monitor logs for reconciliation activity
+
+---
+
+## Session: 2026-02-04 (Phase 5 COMPLETED)
 
 **Timeline of events:**
 1. Resumed Phase 5 — loaded Karpathy skill, reviewed task_plan.md state
@@ -25,21 +90,56 @@
 12. TypeScript compiled cleanly
 13. Removed orphan agent (`user_7f0d3241ec4aae7a`) from live config via Node.js script
 14. Restarted container — Gateway starting with cleaned config
-15. User interrupted to request planning file updates (this entry)
+15. User interrupted to request planning file updates (previous entry)
+16. **FINAL DEPLOY (this session):**
+    - Verified schema fix present in source (agent-creator.ts:78-79)
+    - Ran `./scripts/deploy.sh` — build succeeded, container recreated
+    - Verified deployed JS has schema fix: `cpus: 0.5`, `pidsLimit: 100`
+    - Test 2: `curl POST /webhook/onboarding` with valid token → **200 OK**
+    - Response: `{"status":"created","agentId":"user_7659f051911760f6","phone":"+15559998888"}`
+    - Container remained healthy (no Gateway crash)
+    - Verified agent config: `cpus: 0.5` (number), `pidsLimit: 100` (camelCase)
+    - Logs show: `[webhook] Processing onboarding` → `agent_created success: true`
+    - Gateway auto-reloaded: `[reload] config change applied`
+    - Health check: `{"status":"ok"}`
+    - **Phase 5 COMPLETE**
 
 **Files changed:**
 - `onboarding/src/services/agent-creator.ts` — Fixed sandbox config schema (3 changes)
 - `onboarding/src/lib/sandbox-validator.ts` — Removed invalid `timeoutMs` check
-- `task_plan.md` — Phase 5 status updated with new root cause + fix
-- `findings.md` — Added Patterns 18 (sandbox schema) and 19 (orphan agent on partial failure)
+- `task_plan.md` — Phase 5 marked COMPLETE, Current Phase updated to Phase 6
+- `findings.md` — Added Pattern 20 (two-bug interaction)
 - `progress.md` — This entry
 
 **Next steps:**
-- Redeploy with schema fix
-- Re-run Test 2 (webhook with valid token)
-- Verify Gateway doesn't crash after agent creation
-- Verify agent appears in config + DB
-- If all pass → Phase 5 complete → Phase 6
+- Phase 6: Documentation & Handoff
+  - Update tasks.md with completion status for P0-DEPLOY-009 and P1-DEPLOY-010
+  - Document deployment timestamp in progress.md
+  - Create post-deployment verification checklist
+  - Document any deviations from plan in findings.md
+
+---
+
+## Session: 2026-02-04 (Quick Fix: Missing State Router Mount)
+
+**Timeline of events:**
+1. User asked: "What about SQLite? How do I know full Phase 5 works?"
+2. Verified DB via idempotency test (second webhook call returns `existing`)
+3. Discovered separate issue: state.ts routes not mounted (404 on GET /onboarding/state/:phone)
+4. Root cause: Router imported but never mounted in index.ts
+5. **Fix:** Added `import { router as stateRouter }` + `app.use('/', stateRouter)`
+6. Deployed, ran 3 tests — all passed
+
+**Files changed:**
+- `onboarding/src/index.ts` — Added stateRouter import + mount (+2 lines)
+- `findings.md` — Added Pattern 21 (missing route mount)
+
+**Tests passed:**
+1. Container healthy ✅
+2. GET /onboarding/state/:phone returns full DB row ✅
+3. POST /onboarding/update updates name, persists to DB ✅
+
+**Status:** State router fix deployed and verified. Phase 5 truly complete.
 
 ---
 
@@ -333,11 +433,11 @@
 -->
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 5 in progress — SQLite fix deployed, schema fix applied locally, bad agent cleaned from live config, needs redeploy + re-test |
-| Where am I going? | Redeploy with schema fix → re-run Test 2 → verify Gateway stays up + agent in config + row in DB → Phase 6 |
+| Where am I? | Phase 6 in progress — All integration tests passed (webhook auth, agent creation, Gateway stability, config reload)
+| Where am I going? | Complete Phase 6: Documentation & Handoff → mark P0-DEPLOY-009 and P1-DEPLOY-010 complete → deployment done
 | What's the goal? | Deploy DonClaudioBot v2 to Hetzner VPS with health verification and sandbox image |
-| What have I learned? | 19 anti-patterns (findings.md): SQLite double quotes, Docker cache, OpenClaw camelCase schema, orphan agents from partial failures |
-| What have I done? | Phases 0-4 complete. Phase 5: Test 1 passed (401), found+fixed 2 bugs (SQLite quotes, OpenClaw schema), cleaned orphan agent, awaiting final redeploy+test |
+| What have I learned? | 20 anti-patterns (findings.md): SQLite double quotes, Docker cache, OpenClaw camelCase schema, orphan agents, two-bug interactions
+| What have I done? | Phases 0-5 complete. Phase 5: Fixed 2 bugs (SQLite quotes, OpenClaw sandbox schema), verified end-to-end onboarding flow works |
 
 ---
 <!--

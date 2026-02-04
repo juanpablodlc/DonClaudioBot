@@ -4,6 +4,7 @@
 import express from 'express';
 import { initDatabase } from './services/state-manager.js';
 import { router as webhookRouter } from './routes/webhook.js';
+import { router as stateRouter } from './routes/state.js';
 import { startBaileysSidecar } from './services/baileys-sidecar.js';
 
 const app = express();
@@ -21,6 +22,9 @@ app.get('/health', (req, res) => {
 
 // Mount webhook routes
 app.use('/', webhookRouter);
+
+// Mount state routes
+app.use('/', stateRouter);
 
 // Configuration
 const PORT = process.env.PORT || 3000;

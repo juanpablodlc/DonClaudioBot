@@ -210,13 +210,48 @@
 **Fix:** Changed `cpus` to number, `pids_limit` to `pidsLimit`, removed `timeoutMs`
 **Prevention:** ALWAYS search QMD for exact schema keys before writing config. OpenClaw uses camelCase consistently. Numeric limits (`cpus`) must be actual numbers.
 
-### Pattern 19: Config Write Before DB Insert = Orphan Agent on Failure
+### Pattern 21: Missing Route Mount = Silent 404
+**Symptom:** GET `/onboarding/state/:phone` returns 404 "Cannot GET" even though route exists in `state.ts`
+**Root Cause:** Router was defined and exported, but never imported or mounted in `index.ts`. Only `webhookRouter` was mounted.
+**Evidence:** `index.ts` had `import { router as webhookRouter }` but no import for `stateRouter`. Webhook's internal `getState()` calls worked (uses state-manager.js directly), but HTTP API was inaccessible.
+**Fix:** Import router in `index.ts` + mount with `app.use('/', stateRouter)`
+**Prevention:** When adding new route files, always mount them in the main app file. Use a checklist: (1) create route file, (2) export router, (3) import in index, (4) mount with app.use()
+
+---
+
+### Pattern 20: Two-Bug Interaction Creates Deceptive Root Cause
+**Symptom:** Test 2 passed (200 OK) after fixing bug #2 (schema), making it seem like bug #1 (SQLite quotes) was the only issue.
+**Root Cause:** Bug #1 (SQLite quotes) was caught first because it threw immediately. Bug #2 (schema) was silent — agent was written to config before DB insert failed, so Gateway only crashed when it tried to load that agent on next restart or config reload.
+**Evidence:** Test 2 hit SQLite error first (DB insert happens after config write). The orphan agent with invalid schema sat in `openclaw.json` harmless until Gateway tried to load it.
+**Prevention:** When fixing bugs, always consider: "What if the fix exposes the next bug?" The fact that Test 2 returned 500 means the request failed before hitting bug #2's symptoms. If Test 2 had returned 200, bug #2 would have been silent until Gateway restart.
+**Lesson:** Log-level analysis matters. The Gateway crash logs showed the schema validation error, not the SQLite error. SQLite error was in onboarding logs.
+
+---
 **Symptom:** Gateway crashes after webhook returns 500 (SQLite error). Agent exists in `openclaw.json` but not in SQLite.
 **Root Cause:** `agent-creator.ts` writes agent to `openclaw.json` (Step 4) BEFORE `state-manager.ts` inserts into SQLite (called from webhook handler after `createAgent()` returns). When the DB insert fails, the config already has the agent — but rollback only triggers if `createAgent()` itself throws.
 **Evidence:** `openclaw.json` had `user_7f0d3241ec4aae7a` with binding, but no matching row in `onboarding.db`.
 **Fix (immediate):** Removed orphan agent via Node.js script in container.
 **Consideration:** The current flow is: createAgent (writes config) → createState (writes DB). If createState fails, the agent is orphaned. The rollback in createAgent only covers errors within its own try/catch. The webhook handler should ideally wrap both in a single transaction-like pattern.
 **Prevention:** Verify end-to-end flow after fixing individual bugs — a fix that prevents one error may expose the next step's failure mode.
+
+### Pattern 22: Exported Module Without Main Entry Point = Silent Cron Failure
+**Symptom:** Cron job executes `node reconciliation.js` but nothing happens — no logs, no cleanup, no errors
+**Root Cause:** `reconciliation.ts` exports functions (`reconcileStates()`, `cleanupOrphans()`) but has no main execution block. When Node.js runs the file directly, it imports the module and immediately exits without calling any functions.
+**Evidence:** Cron job `node dist/services/reconciliation.js` would start, compile the module, and exit with code 0 — appearing successful while doing nothing.
+**Fix:** Created `reconciliation-cli.ts` with main() entry point that calls the exported functions and handles process exit codes. Updated cron-setup.sh to reference `reconciliation-cli.js`.
+**Prevention:** Any file intended for standalone execution (CLI tools, cron jobs) MUST have a main execution block. Use `#!/usr/bin/env node` shebang and check `import.meta.url === process.argv[1]` or simply call main() at module level.
+
+### Pattern 23: Wrong Baileys Auth Loading - Direct File Read vs useMultiFileAuthState
+**Symptom:** Baileys sidecar crashes with `TypeError: Cannot read properties of undefined (reading 'me')`
+**Root Cause:** `baileys-sidecar.ts` read `creds.json` directly and passed it to `makeWASocket({ auth: authState })`. Baileys expects auth state loaded via `useMultiFileAuthState(authDir)` which returns `{ creds, keys }` object structure, not the raw creds.json content.
+**Evidence:** OpenClaw's WhatsApp provider uses `useMultiFileAuthState(authDir)` then passes `auth: { creds: state.creds, keys: state.keys }`. Our sidecar did `JSON.parse(readFileSync(authPath))` and passed raw content.
+**Fix:** Changed from:
+  - `const authState = JSON.parse(readFileSync(authPath, 'utf-8'))`
+  - `makeWASocket({ auth: authState })`
+To:
+  - `const { state } = await useMultiFileAuthState(authDir)`
+  - `makeWASocket({ auth: { creds: state.creds, keys: state.keys } })`
+**Prevention:** When using third-party libraries (Baileys, OpenClaw), always check how they load resources. Don't assume direct file reading works — use the library's provided auth loading functions (`useMultiFileAuthState`, `makeCacheableSignalKeyStore`).
 
 ---
 

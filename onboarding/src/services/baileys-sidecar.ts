@@ -1,8 +1,7 @@
 // Baileys Sidecar Service
 // Detects incoming WhatsApp messages from unknown users and triggers onboarding
 
-import makeWASocket, { ConnectionState, DisconnectReason, WAMessage } from '@whiskeysockets/baileys';
-import { readFileSync, existsSync } from 'fs';
+import makeWASocket, { ConnectionState, DisconnectReason, WAMessage, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import { join } from 'path';
 import { getState } from './state-manager.js';
 import { normalizePhoneNumber } from '../lib/phone-normalizer.js';
@@ -84,16 +83,14 @@ async function triggerOnboarding(phone: string): Promise<void> {
 /**
  * Create and configure a new Baileys socket
  */
-function createSocket(authPath: string) {
-  if (!existsSync(authPath)) {
-    console.error(`[baileys-sidecar] Auth file not found: ${authPath}`);
-    throw new Error(`WhatsApp auth not found at ${authPath}`);
-  }
-
-  const authState = JSON.parse(readFileSync(authPath, 'utf-8'));
+async function createSocket(authDir: string) {
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
   return makeWASocket({
-    auth: authState,
+    auth: {
+      creds: state.creds,
+      keys: state.keys,
+    },
     printQRInTerminal: false,
   });
 }
@@ -102,11 +99,11 @@ function createSocket(authPath: string) {
  * Start Baileys sidecar service with auto-reconnect
  */
 export function startBaileysSidecar(): void {
-  const authPath = join(OPENCLAW_DIR, 'credentials/whatsapp', WHATSAPP_ACCOUNT_ID, 'creds.json');
-  console.log(`[baileys-sidecar] Starting with auth: ${authPath}`);
+  const authDir = join(OPENCLAW_DIR, 'credentials/whatsapp', WHATSAPP_ACCOUNT_ID);
+  console.log(`[baileys-sidecar] Starting with auth dir: ${authDir}`);
 
-  function connect() {
-    const socket = createSocket(authPath);
+  async function connect() {
+    const socket = await createSocket(authDir);
 
     // Handle connection state
     socket.ev.on('connection.update', (update: Partial<ConnectionState>) => {

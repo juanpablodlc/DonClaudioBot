@@ -1,16 +1,12 @@
 # DonClaudioBot v2 - Architecture Reference
-
-**Version:** 2.14.0 | **Status:** Production Ready | **Updated:** 2026-02-02
+**Version:** 2.14.0 | **Status:** Production Ready | **Updated:** 2026-02-04
 
 ---
 
 ## Executive Summary
-
 DonClaudioBot is a WhatsApp-based multi-user AI assistant service where each user gets a sandboxed agent with Google OAuth (Gmail/Calendar). This is v2 — a complete redesign of Clawd4All that fixes the timing problem where OAuth happened before sandbox creation.
 
 **v2 Key Fix:** Create agents with sandbox config FIRST, then do OAuth in that agent's context. OpenClaw is used as an npm dependency (not fork), and agents are created dynamically (no pre-provisioning). Onboarding is a deterministic Node.js service with SQLite state tracking, not LLM-driven instructions.
-
-**Current Status:** 31/31 tasks completed, 59/59 verification steps passed. Total LOC: 1,909 across validation, database, API, infrastructure, observability, OAuth monitoring, maintenance, sandbox, and testing components.
 
 **Key Architecture Change (v2.14.0):** Dual-process launcher runs Gateway via `npx openclaw gateway` (not npm import) and Onboarding via `node dist/index.js`. See "Dual-Process Architecture" section below.
 
@@ -43,13 +39,13 @@ DonClaudioBot is a WhatsApp-based multi-user AI assistant service where each use
 
 1. Unknown WhatsApp message received (Baileys sidecar listeners)
 2. Baileys calls `POST /webhook/onboarding` with phone number
-3. Webhook validates E.164 format and auth token (HOOK_TOKEN)
-4. Check SQLite for existing state (idempotent if exists)
-5. Generate unique agentId (`user_<16hex>`) and GOG_KEYRING_PASSWORD
-6. Create dedicated agent via OpenClaw CLI with sandbox config
-7. Update OpenClaw config with new agent binding
-8. Store state in SQLite (phone, agent_id, status='new')
-9. Gateway reloads config (hot-reload supported)
+3. **Webhook layer:** HOOK_TOKEN validation (401 if invalid) → Rate limit check: 10 req/15min per IP (429 if exceeded)
+4. **Validation layer:** Zod validates E.164 phone format (400 if invalid)
+5. **Idempotency check:** SQLite queried for existing state — returns existing agentId with 200 if found
+6. **Agent creation:** Generate unique agentId (`user_<16hex>`) and GOG_KEYRING_PASSWORD (32 bytes base64url)
+7. **Config update (atomic):** Backup openclaw.json → Add agent + binding → proper-lockfile ensures single writer
+8. **Gateway reload:** `fs.watch()` detects config change → auto-reloads (no manual reload needed)
+9. **Database write:** Insert with UNIQUE constraint on phone_number — handles race conditions from concurrent requests
 10. User gets dedicated agent with Google OAuth prompt
 
 **API Endpoints:**
@@ -57,6 +53,12 @@ DonClaudioBot is a WhatsApp-based multi-user AI assistant service where each use
 - `GET /onboarding/state/:phone` — Get current onboarding status
 - `POST /onboarding/update` — Update user details (name, email)
 - `POST /onboarding/handover` — Transition to 'completed' status
+
+**Error Responses:**
+- `401 Unauthorized` — Invalid HOOK_TOKEN
+- `403 Forbidden` — Missing HOOK_TOKEN
+- `400 Bad Request` — Invalid phone format or security violation
+- `429 Too Many Requests` — Rate limit exceeded (10 req/15min)
 
 ### State Transitions
 
@@ -106,6 +108,11 @@ The onboarding flow has 4 atomic steps: CLI call → config update → gateway r
 | DP5 | WAL mode + 5s timeout + UNIQUE constraints | Handles concurrent webhook requests atomically |
 | DP6 | Transactional rollback pattern | Reverse-order cleanup on any step failure |
 | DP7 | Shared HOOK_TOKEN, no docker.sock in sandboxes, file permissions 700/600 | Minimal viable security for Phase 1 |
+| DP8 | Rate limiting: 10 req/15min per IP | Prevents abuse while allowing legitimate retries via express-rate-limit |
+| DP9 | File locking via proper-lockfile | 3 retries with 5s stale timeout prevents concurrent config corruption |
+| DP10 | Atomic writes via temp file + rename | Ensures openclaw.json never corrupts mid-write (power failure safe) |
+| DP11 | State expiration: 24h for new, NULL for active | Auto-cleanup abandoned onboardings via cron |
+| DP12 | Phone normalization: E.164 → filesystem-safe | Strip "+" for GOG_CONFIG_DIR (plus_15551234567) |
 
 ---
 
@@ -176,7 +183,121 @@ Hetzner VPS
         └── onboarding.db (SQLite)
 ```
 
+### Dynamic Message Flow
+
+```mermaid
+graph TD
+    subgraph USER["User (WhatsApp)"]
+        U1["First message"]
+        U2["Ongoing messages"]
+    end
+
+    subgraph GATEWAY["Gateway Process"]
+        G1["Baileys receives"]
+        G2["No binding found"]
+        G3["fs.watch detects change"]
+        G4["Route via binding"]
+    end
+
+    subgraph WEBHOOK["Onboarding Service"]
+        W1["POST /webhook/onboarding"]
+        W2["Validate token + rate limit"]
+        W3["Zod validate phone"]
+        W4["Check SQLite"]
+        W5["Create agent"]
+    end
+
+    subgraph CONFIG["openclaw.json"]
+        C1["agents.list"]
+        C2["bindings: phone → agent"]
+    end
+
+    subgraph SANDBOX["Sandbox Container"]
+        S1["Isolated OAuth tokens"]
+        S2["Agent workspace"]
+    end
+
+    U1 --> G1 --> G2 --> W1
+    W1 -->|Invalid token| E1["401"]
+    W1 --> W2 -->|Rate exceeded| E2["429"]
+    W2 --> W3 -->|Invalid| E3["400"]
+    W3 --> W4 -->|Exists| R1["Return existing"]
+    W4 -->|New| W5 --> C1 --> C2
+    C2 --> G3 --> G4
+    U2 --> G4 --> S1 --> S2
+```
+
 **Deployment Model:** Code updates don't affect WhatsApp auth (stored in named volume `don-claudio-state`). Never run `docker volume rm don-claudio-state` unless re-authenticating.
+
+---
+
+## Concurrency Model
+
+| Operation | Concurrency | Mechanism |
+|-----------|-------------|-----------|
+| **Webhook requests** | Parallel | Rate-limited per IP (10 req/15min), otherwise independent |
+| **Config writes** | Serialized | `proper-lockfile` ensures one writer at a time (~20ms each) |
+| **SQLite reads** | Parallel | WAL mode allows concurrent readers |
+| **SQLite writes** | Serialized | 5s busy timeout, UNIQUE constraints handle races |
+| **Message routing** | Parallel | Each sandbox handles independently after binding |
+| **Agent creation** | Serialized | By design — rare event (once per user ever) |
+
+**Why serialize agent creation?** Config file locking prevents corruption. Total time for 5 concurrent onboardings: ~100ms (imperceptible to humans). Only onboarding serializes — all message routing is fully parallel.
+
+---
+
+## Failure Recovery
+
+| Failure Mode | Detection | Recovery | User Impact |
+|--------------|-----------|----------|-------------|
+| **Webhook crashes mid-onboarding** | — | State reconciliation cron (hourly) creates DB record | None — binding already active |
+| **Sandbox OOM killed** | Next message arrives | Gateway auto-recreates from config | ~2s delay, then normal |
+| **Race condition (UNIQUE violation)** | SQLITE_CONSTRAINT | Return existing agentId from DB | None — idempotent |
+| **Main container crash** | Docker detects | Auto-restart (`restart: unless-stopped`) | <30s delay |
+| **Config write corruption** | Stale .tmp file (>5s) | Next webhook deletes .tmp, retries | None — atomic rename prevented corruption |
+
+**Recovery Time Objectives:**
+- Sandbox crash: <5s
+- Main container crash: <30s
+- VPS reboot: <2min
+- Volume corruption: Manual restore (rare)
+
+---
+
+## Resource Planning Guide
+
+**Per-Agent Cost:**
+- Memory: 512MB (sandbox limit)
+- CPU: 0.5 cores
+- Disk: ~10MB (sessions, tokens)
+
+**VPS Sizing Guide:**
+
+| Plan | RAM | CPU | Est. Users | Verdict |
+|------|-----|-----|------------|---------|
+| CX22 | 4GB | 2 | ≤5 | ❌ Insufficient |
+| CX32 | 8GB | 2 | ~15 | ✅ Minimum viable |
+| CX42 | 16GB | 4 | ~35 | ✅ Comfortable |
+| CX52 | 32GB | 8 | ~75 | ✅ Headroom |
+
+**Monitoring Commands:**
+```bash
+# Container count (should be 1 main + N sandboxes)
+docker ps | wc -l
+
+# Memory usage per container
+docker stats --no-stream
+
+# Webhook rate limiting activity
+docker logs don-claudio-bot | grep "Too many requests"
+
+# Agent creation events
+docker logs don-claudio-bot | grep "agent created"
+```
+
+**When to Scale Up:**
+- >20 active users OR sustained >70% memory usage → Upgrade to CX42
+- >50 active users OR CPU saturation → Consider horizontal scaling (multiple VPSes)
 
 ---
 

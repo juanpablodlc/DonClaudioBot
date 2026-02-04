@@ -22,6 +22,7 @@ services:
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-change-me}
       - HOOK_TOKEN=${HOOK_TOKEN:-change-me}
       - ZAI_API_KEY=${ZAI_API_KEY:-change-me}
+      - BAILEYS_SIDECAR_ENABLED=${BAILEYS_SIDECAR_ENABLED:-true}
     networks:
       - don-claudio-network
     # Security hardening - run as non-root user

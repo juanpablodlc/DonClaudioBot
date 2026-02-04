@@ -28,9 +28,9 @@ fi
 # Get existing crontab
 existing_cron=$(crontab -l 2>/dev/null || true)
 
-# 1. Hourly reconciliation job
-reconciliation_job="0 * * * * cd ${ONBOARDING_DIR} && node dist/services/reconciliation.js >> ${LOG_DIR}/don-claudio-reconciliation.log 2>&1"
-if echo "$existing_cron" | grep -Fq "reconciliation.js"; then
+# 1. Hourly reconciliation job (uses CLI entry point)
+reconciliation_job="0 * * * * cd ${ONBOARDING_DIR} && node dist/services/reconciliation-cli.js >> ${LOG_DIR}/don-claudio-reconciliation.log 2>&1"
+if echo "$existing_cron" | grep -Fq "reconciliation-cli.js"; then
     echo "[SKIP] Hourly reconciliation job already exists"
 else
     echo "[ADD] Hourly reconciliation job (runs at minute 0 every hour)"

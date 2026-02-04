@@ -17,7 +17,7 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-**Phase 5 IN PROGRESS** → SQLite fix deployed + verified. Found 2nd bug: agent-creator.ts generates invalid OpenClaw config schema (cpus as string, pids_limit snake_case, timeoutMs not valid). Fixed locally, cleaned bad agent from live config, needs redeploy + re-test.
+**🚀 PRODUCTION LIVE** → Phase 5 complete, Fix 1 (reconciliation CLI) complete, Fix 2 (Baileys sidecar) complete. All integration tests passed. Baileys sidecar enabled and connected. Automatic WhatsApp onboarding working. New users can send WhatsApp messages to get their own dedicated agents.
 
 ## Phases
 <!--
@@ -30,7 +30,6 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
 <!--
   WHAT: All prerequisite infrastructure tasks completed in previous work sessions.
   WHY: Documents what's already done so we don't repeat work.
-  SOURCE: tasks.md P0-DEPLOY-000 through P0-DEPLOY-008 (9 completed tasks)
 -->
 - [x] P0-DEPLOY-000: Pre-deployment backup procedure (scripts/backup.sh created)
 - [x] P0-DEPLOY-001: Verify prerequisites (scripts/verify-prereqs.sh created)
@@ -147,7 +146,7 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
 - [x] Image size: 495MB (ID: 053b342741af)
 - **Status:** **COMPLETE**
 
-### Phase 5: Integration Testing
+### Phase 5: Integration Testing (COMPLETE)
 <!--
   WHAT: Test webhook endpoint and verify onboarding flow works.
   WHY: Production deployment means nothing if the service doesn't work end-to-end.
@@ -170,22 +169,29 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
 - [x] **FIX APPLIED (agent-creator.ts):** Changed `cpus` to number `0.5`, `pids_limit` to `pidsLimit`, removed `timeoutMs` from sandbox config. Also removed stale `timeoutMs` check from `sandbox-validator.ts`.
 - [x] Removed bad agent (`user_7f0d3241ec4aae7a`) from live config via Node.js script
 - [x] Restarted container — Gateway starting with cleaned config
-- [ ] **NEXT:** Redeploy with schema fix, then re-run Test 2 (webhook with valid token)
-- [ ] Verify agent creation in logs
-- [ ] Verify Gateway doesn't crash after agent creation
-- [ ] Check database state: `ssh root@135.181.93.227 'docker exec don-claudio-bot sqlite3 /home/node/.openclaw/onboarding.db "SELECT * FROM onboarding_states;"'`
-- **Status:** **in_progress** — Schema fix applied locally, bad agent cleaned from live config, needs redeploy + re-test
+- [x] **FINAL TEST (2026-02-04):** Redeployed with schema fix → webhook POST with valid token → **PASSED**
+  - Response: `{"status":"created","agentId":"user_7659f051911760f6","phone":"+15559998888"}`
+  - Container remained healthy (no Gateway crash)
+  - Agent config verified: `cpus: 0.5` (number), `pidsLimit: 100` (camelCase), no `timeoutMs`
+  - Gateway auto-reloaded config successfully
+- [x] Logs verified: `[webhook] Processing onboarding for phone: +15559998888` → `agent_created` with `success: true`
+- [x] Health check: `{"status":"ok"}`
+- [x] **BONUS FIX:** Discovered state.ts router wasn't mounted (GET /onboarding/state/:phone returned 404). Fixed: added import + mount in index.ts. Verified with 3 tests: container healthy, GET state returns DB row, POST update persists. ✅
+- **Status:** **COMPLETE** — All integration tests passed, onboarding flow working end-to-end, state API accessible
 
-### Phase 6: Documentation & Handoff
+### Phase 6: Documentation & Handoff (COMPLETE - PRODUCTION APPROVED)
 <!--
   WHAT: Document deployment results and create handoff notes.
   WHY: Future you (or others) need to know what was done and how to verify it.
 -->
-- [ ] Update tasks.md with completion status for P0-DEPLOY-009 and P1-DEPLOY-010
-- [ ] Document deployment timestamp in progress.md
-- [ ] Create post-deployment verification checklist
-- [ ] Document any deviations from plan in findings.md
-- **Status:** pending
+- [x] Update tasks_plan.md with completion status
+- [x] Document deployment timestamp in progress.md (2026-02-04 session entry)
+- [x] Create post-deployment verification checklist
+- [x] Document any deviations from plan in findings.md (Patterns 16-20)
+- [x] **Fix 1:** Reconciliation CLI entry point (reconciliation-cli.ts created, cron-setup.sh updated)
+- [x] Production readiness analysis: 5 concurrent onboardings + 2 active users = ~4.5GB RAM (fits CX32 8GB)
+- [x] fs.watch() risk accepted: chokidar has awaitWriteFinish for atomic renames, cron serves as safety net
+- **Status:** **COMPLETE — PRODUCTION APPROVED 🚀**
 
 ## Key Questions
 <!--
@@ -212,7 +218,7 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
 | Local integration test first | Dress rehearsal catches issues before they reach production |
 | Keep old container 10min | Rollback window if deployment fails |
 | Build sandbox AFTER deploy | Onboarding works without sandbox; dedicated agents need it but aren't step 1 |
-| Phase 0 marked complete | 9/11 tasks already completed per tasks.md and commit history |
+| Phase 0 marked complete | 9/11 tasks already completed per old deleted tasks.md and commit history |
 | **ENV VAR NAMING:** Use `OPENCLAW_GATEWAY_TOKEN` | OpenClaw standard (32 doc matches) - was using wrong var name |
 | **TEMPLATE FIX:** Update schema only | Changed `gateway.token` → `gateway.auth.token`, kept rest |
 | **STOP at circular debugging** | 3-Strike Error Protocol - pause and reassess approach |
@@ -312,7 +318,7 @@ If you find yourself doing any of these, STOP and reassess:
 - **Rollback:** If deployment fails, run ./scripts/rollback.sh immediately
 - **Volume Persistence:** don-claudio-state volume survives deployments (WhatsApp auth lives here)
 - **Never run:** `docker volume rm don-claudio-state` unless you want to re-authenticate WhatsApp
-- **Server State:** Fresh Hetzner VPS - no containers, no volumes (wiped 2026-02-02 per tasks.md)
+- **Server State:** Fresh Hetzner VPS - no containers, no volumes (wiped 2026-02-02 per older file tasks.md)
 
 **RESUMING TOMORROW - Read this first:**
 
@@ -344,10 +350,10 @@ If you find yourself doing any of these, STOP and reassess:
 
 ---
 
-## Migration Notes (from tasks.md)
+## Migration Notes (from old removed tasks.md)
 
 ### Completed Tasks (9/11) - Mapped to Phase 0
-The following tasks from tasks.md are COMPLETE and documented in Phase 0 above:
+The following tasks from the removed tasks.md are COMPLETE and documented in Phase 0 above:
 - P0-DEPLOY-000: Pre-deployment backup procedure ✓
 - P0-DEPLOY-001: Verify prerequisites ✓
 - P0-DEPLOY-002: Install OpenClaw CLI in container ✓

@@ -253,6 +253,50 @@ To:
   - `makeWASocket({ auth: { creds: state.creds, keys: state.keys } })`
 **Prevention:** When using third-party libraries (Baileys, OpenClaw), always check how they load resources. Don't assume direct file reading works — use the library's provided auth loading functions (`useMultiFileAuthState`, `makeCacheableSignalKeyStore`).
 
+### Pattern 24: Empty Agent Workspaces - No Template Files Copied
+**Symptom:** Newly created agents have EMPTY workspaces - no AGENTS.md, SOUL.md, or MEMORY.md files
+**Root Cause:** `agent-creator.ts` creates workspace directory but doesn't copy template files from `config/agents/dedicated/`. The workspace is created empty, so agents use OpenClaw defaults with no custom instructions or personality.
+**Evidence:** `mkdir(agentConfig.workspace, { recursive: true })` - only creates directory, no file copy. Template files exist in `config/agents/dedicated/` but are never used.
+**Fix Needed:** Implement template copying in `agent-creator.ts` to copy `config/agents/dedicated/*` to `workspace-<id>/` during agent creation.
+**Prevention:** When implementing agent creation, ALWAYS verify workspace template files are copied. Test by checking if `workspace-<id>/AGENTS.md` exists after agent creation.
+
+### Pattern 25: Read-Only Workspace Blocks Memory Writes and User Edits
+**Symptom:** Users cannot edit their AGENTS.md/SOUL.md/MEMORY.md files; agents cannot write memory to MEMORY.md
+**Root Cause:** Sandbox config has `workspaceAccess: 'ro'` (read-only) which mounts workspace as read-only in sandbox. This prevents:
+  - Agents from writing to memory files
+  - Users from editing their agent configuration
+**Current Config:** `workspaceAccess: 'ro'` in agent-creator.ts:69
+**Fix Needed:** Change to `workspaceAccess: 'rw'` OR separate read-only instructions from writeable memory. Research OpenClaw's memory write patterns to understand the security implications.
+**Trade-off:** Read-write workspace allows user customization and agent memory writes, but potentially allows compromised agents to modify their own instructions (security consideration for untrusted AI).
+**Prevention:** When setting sandbox permissions, consider whether users should be able to modify their agent's behavior. If yes, workspace must be writeable. If no, keep read-only and use alternative memory storage.
+
+### Pattern 26: Missing User Data - No Onboarding Conversation
+**Symptom:** Agents created with only phone number - no name, email, or user preferences collected
+**Root Cause:** Agent creation is transactional and immediate - webhook triggers → agent created → binding added. No conversational flow to collect user details.
+**Current Flow:** Unknown WhatsApp message → Webhook → Create agent with phone → Return 201
+**Desired Flow:** Unknown WhatsApp message → Webhook → Create agent → Agent greets user → Agent asks for name/email → Agent stores in MEMORY.md
+**Fix Needed:** Implement conversational onboarding in the agent itself (post-creation). Agent's first interaction should request user details, then update its own memory files.
+**Prevention:** When designing agent creation, consider whether you need user metadata upfront. If yes, design a two-phase flow: (1) Create agent with minimal data, (2) Agent collects rest via conversation.
+
+### Pattern 27: Template Directory Path in Container
+**Discovery:** When running in Docker container, `process.cwd()` returns `/app` (the WORKDIR from Dockerfile). Template path must be relative to this, not to the source file location.
+**Templates Location:** `/app/config/agents/dedicated-es/` (mounted from host `config/agents/dedicated-es/`)
+**Implementation:** `join(process.cwd(), 'config', 'agents', 'dedicated-es')` resolves to `/app/config/agents/dedicated-es/` in container
+**Prevention:** When adding file operations in containerized services, remember that `process.cwd()` is the container WORKDIR, not the source file directory. Use paths relative to WORKDIR.
+
+### Pattern 28: Template Copy Failures Should Be Warnings, Not Errors
+**Design Decision:** Template copy failures (missing files, permission errors) log `console.warn()` but don't throw. Agent creation succeeds even if templates are missing.
+**Rationale:** Agents should be functional even without custom templates - they'll use OpenClaw defaults. Failing agent creation for missing templates would be too strict.
+**Trade-off:** Silent failure means admins might not notice templates are missing until agents behave with default personality.
+**Prevention:** When implementing optional file operations (templates, configs), consider whether failure should be (a) silent (feature is optional), (b) warning (feature is nice-to-have), or (c) error (feature is critical).
+
+### Pattern 29: Memory Write Requires workspaceAccess 'rw'
+**Discovery:** OpenClaw memory flush (auto-writing to MEMORY.md and memory/YYYY-MM-DD.md) is SKIPPED when `workspaceAccess: 'ro'` or `'none'`.
+**Root Cause:** From memory.md docs: "Workspace must be writable: if the session runs sandboxed with `workspaceAccess: \"ro\"` or `\"none\"`, the flush is skipped."
+**Fix:** Changed `workspaceAccess: 'ro'` → `'rw'` in agent-creator.ts
+**Security Consideration:** `'rw'` allows agents to modify their own AGENTS.md/SOUL.md files. This is acceptable for user-owned dedicated agents (users can already edit files via host access).
+**Prevention:** When designing agent workspaces, decide: (a) Read-only instructions + separate memory storage (complex), or (b) Writeable workspace with user trust (simple, Clawd4All v1 approach).
+
 ---
 
 ## Docker Deployment Checklist (Anti-Pattern Prevention)

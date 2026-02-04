@@ -66,7 +66,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
       sandbox: {
         mode: 'all',
         scope: 'agent',
-        workspaceAccess: 'ro',
+        workspaceAccess: 'rw',  // Allow agents to write memory and users to edit their agent files
         docker: {
           image: 'openclaw-sandbox:bookworm-slim',
           env: {
@@ -90,11 +90,26 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
     configUpdated = true;
 
     // Step 5: Create agent workspace directory structure (what CLI would have done)
-    const { mkdir } = await import('fs/promises');
+    const { mkdir, copyFile } = await import('fs/promises');
     await mkdir(agentConfig.workspace, { recursive: true });
 
     // Step 6: Create agent state directory
     await mkdir(agentConfig.agentDir!, { recursive: true });
+
+    // Step 7: Copy Spanish "Don Claudio" template files to workspace
+    // Templates are located at config/agents/dedicated-es/ relative to project root
+    const { join } = await import('path');
+    const templateDir = join(process.cwd(), 'config', 'agents', 'dedicated-es');
+    const templateFiles = ['AGENTS.md', 'SOUL.md', 'MEMORY.md'];
+
+    for (const file of templateFiles) {
+      try {
+        await copyFile(join(templateDir, file), join(agentConfig.workspace, file));
+      } catch (error) {
+        // Log warning but don't fail agent creation if templates are missing
+        console.warn(`[agent-creator] Could not copy template file ${file}:`, error);
+      }
+    }
 
     // Gateway auto-reloads via fs.watch() - no manual reload needed
 

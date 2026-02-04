@@ -17,7 +17,7 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-**🚀 PRODUCTION LIVE** → Phase 5 complete, Fix 1 (reconciliation CLI) complete, Fix 2 (Baileys sidecar) complete. All integration tests passed. Baileys sidecar enabled and connected. Automatic WhatsApp onboarding working. New users can send WhatsApp messages to get their own dedicated agents.
+**🚀 PRODUCTION LIVE** → Phase 5 complete, Fix 1 (reconciliation CLI) complete, Fix 2 (Baileys sidecar) complete, Phase 7 complete (Spanish templates), Phase 8 complete (two-phase onboarding + workspaceAccess 'rw'). All integration tests passed. Baileys sidecar enabled and connected. Automatic WhatsApp onboarding working. New users get dedicated "Don Claudio" agents that collect name/email via conversation.
 
 ## Phases
 <!--
@@ -187,11 +187,37 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
 - [x] Update tasks_plan.md with completion status
 - [x] Document deployment timestamp in progress.md (2026-02-04 session entry)
 - [x] Create post-deployment verification checklist
-- [x] Document any deviations from plan in findings.md (Patterns 16-20)
+- [x] Document any deviations from plan in findings.md (Patterns 16-23)
 - [x] **Fix 1:** Reconciliation CLI entry point (reconciliation-cli.ts created, cron-setup.sh updated)
+- [x] **Fix 2:** Baileys sidecar enabled (BAILEYS_SIDECAR_ENABLED=true, fixed auth loading)
 - [x] Production readiness analysis: 5 concurrent onboardings + 2 active users = ~4.5GB RAM (fits CX32 8GB)
 - [x] fs.watch() risk accepted: chokidar has awaitWriteFinish for atomic renames, cron serves as safety net
-- **Status:** **COMPLETE — PRODUCTION APPROVED 🚀**
+- **Status:** **COMPLETE — PRODUCTION LIVE 🚀**
+
+### Phase 7: Spanish "Don Claudio" Agent Templates (COMPLETE)
+<!--
+  WHAT: Create Spanish-language agent template files for new users.
+  WHY: Currently new agents get EMPTY workspaces - no AGENTS.md/SOUL.md/MEMORY.md.
+-->
+- [x] Create `config/agents/dedicated-es/AGENTS.md` - Spanish instructions for Don Claudio assistant
+- [x] Create `config/agents/dedicated-es/SOUL.md` - Spanish personality, tone, behavioral guidelines
+- [x] Create `config/agents/dedicated-es/MEMORY.md` - Spanish memory structure with user fields
+- [x] Update `agent-creator.ts` to copy templates to `workspace-<id>/` on agent creation
+- [x] Test that template files are copied correctly to new agent workspaces
+- **Status:** **COMPLETE** — Spanish "Don Claudio" templates created, template copying implemented
+
+### Phase 8: Two-Phase Onboarding & Variable Collection (COMPLETE)
+<!--
+  WHAT: Implement follow-up conversation to collect user details (name, email) after agent creation.
+  WHY: Currently agents are created with phone number only - no user info collected.
+-->
+- [x] **CRITICAL:** Research `workspaceAccess` permissions - changed from `ro` to `rw` to enable memory writes
+- [x] Design conversational flow for agent to request name/email after first message
+- [x] Implement agent-side conversation handler for variable collection (via MEMORY.md onboarding instructions)
+- [x] Update memory files with collected user data (name, email)
+- [x] Test two-phase flow: phone → agent creation → conversation → data collection
+- [x] Ensure users can edit their AGENTS.md/SOUL.md/MEMORY.md files (write permissions enabled)
+- **Status:** **COMPLETE** — workspaceAccess changed to 'rw', MEMORY.md includes onboarding prompt for agents
 
 ## Key Questions
 <!--

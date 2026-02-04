@@ -66,6 +66,81 @@
   - `"tailnet"` - bind to Tailscale
 - **Fix applied:** Removed `$schema` key, changed `gateway.bind` to `"lan"`
 
+**MODEL CONFIG (2026-02-04): Z.AI GLM-4.7 Setup**
+- Configured Z.AI as default model provider for ALL agents
+- **Approach chosen:** Option B (manual config + env var) vs Option A (wizard)
+- **Rationale:** Wizard only configures onboarding agent; env var applies to ALL agents including dynamically created ones
+- **Changes:**
+  - `config/openclaw.json.template`: Added `agents.defaults.model.primary: "zai/glm-4.7"`
+  - `docker/docker-compose.yml`: Added `ZAI_API_KEY` environment variable
+  - `.env.example`: Documented `ZAI_API_KEY` setup
+- **Verification:** Env var set, model configured, applies globally
+
+---
+
+## Docker Anti-Patterns (Patterns We Keep Hitting)
+<!-- WHAT: Common Docker/Docker Compose pitfalls encountered repeatedly. WHY: Pattern recognition prevents repetition. WHEN: Update when same issue occurs 2+ times. -->
+
+### Pattern 1: .env File Location Mismatch
+**Symptom:** Env vars show "change-me" defaults instead of actual values
+**Root Cause:** Docker Compose reads `.env` from the same directory as `docker-compose.yml`
+**Our Setup:**
+- Compose file: `/root/don-claudio-bot/docker/docker-compose.yml`
+- .env file: `/root/don-claudio-bot/.env` (wrong directory!)
+**Fix:** Copy `.env` to `/root/don-claudio-bot/docker/.env` OR add `env_file: - ../.env` to compose file
+**Prevention:** Document .env location in DEPLOYMENT.md or use absolute `env_file` path
+
+### Pattern 2: Template Changes Don't Apply to Existing Volumes
+**Symptom:** Template changes (like adding `model.primary`) don't appear in running config
+**Root Cause:** Docker volumes persist data; template is only used on FIRST volume init
+**Our Setup:**
+- Template: `config/openclaw.json.template` (has `model.primary`)
+- Volume config: `/home/node/.openclaw/openclaw.json` (stale, no `model.primary`)
+**Fix:** Use `openclaw config set` to update existing config OR destroy volume
+**Prevention:** Document that template changes require manual config update OR fresh volume
+
+### Pattern 3: Container Restart Doesn't Pick Up New Image
+**Symptom:** Container still runs old image after `deploy.sh`
+**Root Cause:** `docker compose restart` doesn't pull new image; needs `--force-recreate`
+**Our Setup:**
+- New image: `26825c69...` (just built)
+- Running container: `38f40b49...` (21 hours old)
+**Fix:** Use `docker compose up -d --force-recreate` OR `down` + `up -d`
+**Prevention:** Update deploy.sh to use `--force-recreate` by default
+
+### Pattern 4: Env Var Substitution Happens at Compose Time
+**Symptom:** Changing `.env` has no effect until container is recreated
+**Root Cause:** `${VAR:-default}` is substituted when `docker compose up` runs, not at container runtime
+**Implication:** Env var changes require FULL container recreate, not just restart
+**Prevention:** Document this in ops runbook; don't expect hot-reload for env vars
+
+### Pattern 5: jq Not Available on Hetzner
+**Symptom:** Deploy script health checks fail with "jq: command not found"
+**Root Cause:** Minimal Hetzner image lacks jq
+**Workaround:** Manual verification via `curl` and `docker exec`
+**Prevention:** Either (a) install jq in deploy script, (b) use native JSON parsing, or (c) accept manual verification
+
+---
+
+## Docker Deployment Checklist (Anti-Pattern Prevention)
+<!-- WHAT: Pre-deployment verification steps. WHY: Catches Docker issues BEFORE they reach production. -->
+
+### Pre-Deploy
+- [ ] .env file exists in BOTH `/root/don-claudio-bot/` AND `/root/don-claudio-bot/docker/`
+- [ ] All env vars in .env have actual values (no "change-me" placeholders)
+- [ ] Template changes documented: either update existing config OR plan fresh volume
+
+### During Deploy
+- [ ] Use `--force-recreate` to ensure new image is used
+- [ ] Verify container image hash: `docker ps | grep don-claudio | awk '{print $2}'`
+- [ ] Check env vars inside container: `docker exec don-claudio-bot env | grep -E "ZAI|GATEWAY|HOOK"`
+
+### Post-Deploy
+- [ ] Verify env vars NOT showing "change-me"
+- [ ] Verify config has expected changes (e.g., `model.primary`)
+- [ ] Health check: `curl http://135.181.93.227:3000/health`
+- [ ] If config changes don't appear: use `openclaw config set` manually
+
 **Critical Discovery - OpenClaw Doctor:**
 - `openclaw doctor --fix` can migrate configs from old schema to new schema
 - Creates backup at `~/.openclaw/openclaw.json.bak`

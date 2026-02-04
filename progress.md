@@ -5,6 +5,54 @@
   WHEN: Update after completing each phase or encountering errors. More detailed than task_plan.md.
 -->
 
+## Session: 2026-02-04 (Z.AI GLM-4.7 Configuration + Docker Pattern Learning)
+
+**Timeline of events:**
+1. User asked: "Where should Z.AI API key go for ALL agents?"
+2. Analyzed 5 options using Karpathy principles
+3. Chose Option B: Manual config + env var (not wizard) - applies to ALL agents including dynamically created
+4. Made 3 surgical changes:
+   - `config/openclaw.json.template`: Added `agents.defaults.model.primary: "zai/glm-4.7"`
+   - `docker/docker-compose.yml`: Added `ZAI_API_KEY=${ZAI_API_KEY:-change-me}`
+   - `.env.example`: Documented ZAI_API_KEY setup
+5. User provided API key, appended to .env
+6. **Deployed - HIT MULTIPLE DOCKER ISSUES:**
+   - ZAI_API_KEY showed "change-me" (env var not picked up)
+   - Container still running 21-hour-old image (no recreate)
+   - Config didn't have `model.primary` (template changes don't apply to existing volumes)
+7. **Root causes identified:**
+   - `.env` was in `/root/don-claudio-bot/` but compose file in `/root/don-claudio-bot/docker/`
+   - Docker Compose reads `.env` from same directory as compose file
+   - Needed to copy `.env` to `docker/` subdirectory
+   - Template changes don't apply to existing volumes (needed `openclaw config set`)
+   - Deploy script doesn't force recreate
+8. **Fixed all issues:**
+   - Copied `.env` to `/root/don-claudio-bot/docker/.env`
+   - Ran `docker compose up -d --force-recreate`
+   - Used `openclaw config set agents.defaults.model.primary zai/glm-4.7`
+   - Restarted container
+9. **Verified success:**
+   - ZAI_API_KEY=67e0ae6983b04f7c8b476a771158be88.Q629xr984Y8O7Ovf
+   - model.primary = "zai/glm-4.7"
+   - Health: {"status":"ok"}
+
+**Key Learnings (Docker Anti-Patterns):**
+1. **Env file location matters** - Docker Compose reads `.env` from same dir as compose file
+2. **Template ≠ Volume Config** - Template only used on FIRST volume init; changes require manual update
+3. **Restart ≠ Recreate** - `restart` doesn't pull new image; need `--force-recreate`
+4. **Env var substitution timing** - Happens at compose time, not runtime; changes require full recreate
+5. **jq missing** - Hetzner minimal image lacks jq; deploy script health checks fail
+
+**Files changed:**
+- `config/openclaw.json.template` - Added `model.primary: "zai/glm-4.7"`
+- `docker/docker-compose.yml` - Added ZAI_API_KEY env var
+- `.env.example` - Documented ZAI_API_KEY
+- `findings.md` - Added "Docker Anti-Patterns" section
+
+**Next steps:**
+- Phase 3: WhatsApp Authentication (set up SSH tunnel, scan QR code)
+- Update deploy.sh to handle .env location and force recreate by default
+
 ## Session: 2026-02-03 (Fresh Volume Start - SUCCESS)
 
 **Timeline of events:**

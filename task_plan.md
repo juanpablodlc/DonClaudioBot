@@ -17,7 +17,7 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-**Phase 4 COMPLETE** → Next: Phase 5 (Integration Testing)
+**Phase 5 IN PROGRESS** → SQLite fix deployed + verified. Found 2nd bug: agent-creator.ts generates invalid OpenClaw config schema (cpus as string, pids_limit snake_case, timeoutMs not valid). Fixed locally, cleaned bad agent from live config, needs redeploy + re-test.
 
 ## Phases
 <!--
@@ -153,11 +153,28 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
   WHY: Production deployment means nothing if the service doesn't work end-to-end.
   MAPPED FROM: P0-DEPLOY-009 verification steps
 -->
-- [ ] Test webhook without token (expect 401/403): `curl -X POST http://135.181.93.227:3000/webhook/onboarding -H 'Content-Type: application/json' -d '{"phone":"+15551234567"}'`
-- [ ] Test webhook with valid token (expect 201): `curl -X POST http://135.181.93.227:3000/webhook/onboarding -H "Authorization: Bearer $HOOK_TOKEN" -H 'Content-Type: application/json' -d '{"phone":"+15551234567"}'`
+- [x] **DISCOVERED:** Deployed code was OLD — still used `execFile`/`npx openclaw agents add` (interactive CLI). Local source already fixed to use `config-writer.js` (direct config editing). Root cause: previous deploys didn't rebuild the Docker image layer with new compiled JS.
+- [x] Redeployed with updated code — verified `/app/onboarding/dist/services/agent-creator.js` now uses `config-writer.js` imports (no `execFile`)
+- [x] Test webhook without token (expect 401): **PASSED** → `401 Unauthorized`, `{"error":"Missing authorization header"}`
+- [x] Test webhook with valid token: **FAILED 500** → SQLite error: `no such column: "now"`
+- [x] **ROOT CAUSE:** `state-manager.ts:61` used `datetime("now")` — double quotes = column identifier in SQLite. Schema.sql correctly uses `datetime('now')` with single quotes.
+- [x] **FIX APPLIED:** Changed line 61 from single-quoted JS string with double-quoted SQL to backtick template literal with single-quoted SQL: `` `...datetime('now', '+24 hours')` ``
+- [x] TypeScript compiled successfully after fix
+- [x] Redeployed with SQLite fix — verified `datetime('now')` in deployed JS ✅
+- [x] Verified deployed `agent-creator.js` uses `config-writer.js` imports ✅
+- [x] Test 2 re-run: **FAILED** — curl HTTP 000 (connection reset). Gateway was crashing, killed the onboarding process.
+- [x] **ROOT CAUSE #2:** Previous Test 2 (which hit SQLite error) had already written an agent to `openclaw.json` before the DB insert failed. That agent's config had 3 schema violations that crashed Gateway:
+  - `cpus: '0.5'` — string, OpenClaw expects number
+  - `pids_limit: 100` — snake_case, OpenClaw expects `pidsLimit` (camelCase)
+  - `timeoutMs: 30000` — not a valid sandbox-level key (only valid for browser config)
+- [x] **FIX APPLIED (agent-creator.ts):** Changed `cpus` to number `0.5`, `pids_limit` to `pidsLimit`, removed `timeoutMs` from sandbox config. Also removed stale `timeoutMs` check from `sandbox-validator.ts`.
+- [x] Removed bad agent (`user_7f0d3241ec4aae7a`) from live config via Node.js script
+- [x] Restarted container — Gateway starting with cleaned config
+- [ ] **NEXT:** Redeploy with schema fix, then re-run Test 2 (webhook with valid token)
 - [ ] Verify agent creation in logs
+- [ ] Verify Gateway doesn't crash after agent creation
 - [ ] Check database state: `ssh root@135.181.93.227 'docker exec don-claudio-bot sqlite3 /home/node/.openclaw/onboarding.db "SELECT * FROM onboarding_states;"'`
-- **Status:** pending
+- **Status:** **in_progress** — Schema fix applied locally, bad agent cleaned from live config, needs redeploy + re-test
 
 ### Phase 6: Documentation & Handoff
 <!--
@@ -277,6 +294,11 @@ If you find yourself doing any of these, STOP and reassess:
 | Set `gateway.mode = local` | 7 | **Resolved:** Used `openclaw config set gateway.mode local` |
 | Gateway: "no token configured" | 8 | Set `gateway.auth.token` directly via `openclaw config set` |
 | **ROOT CAUSE FOUND:** Wrong env var name | 9 | **FIXED:** Changed `GATEWAY_TOKEN` → `OPENCLAW_GATEWAY_TOKEN` (verified via 32 QMD searches) |
+| Deployed code was stale (old agent-creator.js) | Phase 5 | **FIXED:** Redeployed — Docker build layer was cached with old compiled JS |
+| SQLite 500: `no such column: "now"` | Phase 5 | **FIXED:** `datetime("now")` → `datetime('now')` in state-manager.ts:61 (double quotes = column name in SQLite) |
+| SSH flaky: `kex_exchange_identification: Connection reset` | Phase 5 | **Transient:** Retry after 3-5s delay works. Hetzner SSH rate limiting or network hiccup. |
+| Gateway crash: invalid agent config schema | Phase 5 | **FIXED:** `agent-creator.ts` generated `cpus: '0.5'` (string), `pids_limit` (snake_case), `timeoutMs` (invalid key). Changed to `cpus: 0.5` (number), `pidsLimit` (camelCase), removed `timeoutMs`. |
+| Partial agent creation before DB error | Phase 5 | **FIXED:** Previous test wrote agent to openclaw.json before SQLite INSERT failed. Removed orphan via Node.js script. Need to consider: should config write happen AFTER DB insert? |
 
 ## Notes
 <!--

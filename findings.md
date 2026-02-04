@@ -183,6 +183,41 @@
 **Output:** `http://127.0.0.1:18789/?token=<url-encoded-token>`
 **Prevention:** Always use `openclaw dashboard` to get the correct access URL instead of manually constructing it
 
+### Pattern 16: SQLite Double Quotes = Column Identifiers (NOT String Literals)
+**Symptom:** `500 Internal Server Error: no such column: "now" - should this be a string literal in single-quotes?`
+**Root Cause:** `datetime("now", "+24 hours")` — double quotes in SQLite are column identifiers per SQL standard. `"now"` is treated as a column name, not the string `'now'`.
+**Our Setup:**
+- `state-manager.ts:61` used JS single-quoted string containing SQL with double-quoted `"now"`
+- `schema.sql` correctly used `datetime('now')` with single quotes everywhere
+**Fix:** Changed to backtick template literal: `` `...datetime('now', '+24 hours')` `` — allows single quotes inside SQL without escaping
+**Prevention:** Always use backtick template literals for SQL strings containing single quotes. Never use double quotes for SQL string literals.
+
+### Pattern 17: Docker Build Cache Serves Stale Compiled JS
+**Symptom:** Deployed container has OLD `agent-creator.js` (uses `execFile`/CLI) despite local source being correct (uses `config-writer.js`)
+**Root Cause:** Docker `COPY onboarding/src` + `RUN npm run build` layers were cached. The COPY layer hash didn't change because the `.ts` source was the same as when the cache was built — but the compiled `.js` in `dist/` was different locally.
+**Evidence:** `head -15 /app/onboarding/dist/services/agent-creator.js` showed `execFile` imports (old code) while local `dist/` had `config-writer.js` imports (new code).
+**Fix:** Forced rebuild with `--no-cache` or ensured source files changed to bust cache. Deploy script's `docker compose up --build --force-recreate` rebuilt correctly after rsync updated source on server.
+**Prevention:** After significant code changes, verify deployed JS matches local JS: `ssh ... 'docker exec container head -15 /app/path/to/file.js'`
+
+### Pattern 18: OpenClaw Sandbox Docker Schema Uses camelCase + Strict Types
+**Symptom:** Gateway crashes with: `agents.list.1.sandbox.docker.cpus: Invalid input: expected number, received string`, `Unrecognized key: "pids_limit"`, `Unrecognized key: "timeoutMs"`
+**Root Cause:** `agent-creator.ts` generated config with wrong types/keys:
+- `cpus: '0.5'` — OpenClaw expects **number** `0.5`, not string
+- `pids_limit: 100` — OpenClaw expects **camelCase** `pidsLimit`
+- `timeoutMs: 30000` — not a valid sandbox key (only valid for `browser` config)
+**OpenClaw sandbox.docker valid keys (from docs):**
+`network`, `user`, `pidsLimit`, `memory`, `memorySwap`, `cpus`, `ulimits`, `seccompProfile`, `apparmorProfile`, `dns`, `extraHosts`, `image`, `env`, `setupCommand`
+**Fix:** Changed `cpus` to number, `pids_limit` to `pidsLimit`, removed `timeoutMs`
+**Prevention:** ALWAYS search QMD for exact schema keys before writing config. OpenClaw uses camelCase consistently. Numeric limits (`cpus`) must be actual numbers.
+
+### Pattern 19: Config Write Before DB Insert = Orphan Agent on Failure
+**Symptom:** Gateway crashes after webhook returns 500 (SQLite error). Agent exists in `openclaw.json` but not in SQLite.
+**Root Cause:** `agent-creator.ts` writes agent to `openclaw.json` (Step 4) BEFORE `state-manager.ts` inserts into SQLite (called from webhook handler after `createAgent()` returns). When the DB insert fails, the config already has the agent — but rollback only triggers if `createAgent()` itself throws.
+**Evidence:** `openclaw.json` had `user_7f0d3241ec4aae7a` with binding, but no matching row in `onboarding.db`.
+**Fix (immediate):** Removed orphan agent via Node.js script in container.
+**Consideration:** The current flow is: createAgent (writes config) → createState (writes DB). If createState fails, the agent is orphaned. The rollback in createAgent only covers errors within its own try/catch. The webhook handler should ideally wrap both in a single transaction-like pattern.
+**Prevention:** Verify end-to-end flow after fixing individual bugs — a fix that prevents one error may expose the next step's failure mode.
+
 ---
 
 ## Docker Deployment Checklist (Anti-Pattern Prevention)

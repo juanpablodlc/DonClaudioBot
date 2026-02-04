@@ -58,7 +58,7 @@ export function createState(phone: string, agentId: string, status: string = 'ne
 
   const insertStmt = db!.transaction(() => {
     const stmt = db!.prepare(
-      'INSERT INTO onboarding_states (phone_number, agent_id, status, expires_at) VALUES (?, ?, ?, datetime("now", "+24 hours"))'
+      `INSERT INTO onboarding_states (phone_number, agent_id, status, expires_at) VALUES (?, ?, ?, datetime('now', '+24 hours'))`
     );
     stmt.run(phone, agentId, status);
   });

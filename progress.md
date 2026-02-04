@@ -5,6 +5,44 @@
   WHEN: Update after completing each phase or encountering errors. More detailed than task_plan.md.
 -->
 
+## Session: 2026-02-04 (Phase 5 continued: Schema Fix + Redeploy)
+
+**Timeline of events:**
+1. Resumed Phase 5 — loaded Karpathy skill, reviewed task_plan.md state
+2. Verified SQLite fix in source: `state-manager.ts:61` uses `datetime('now')` ✅
+3. Verified no other `datetime("` occurrences in codebase ✅
+4. Verified `agent-creator.ts` imports from `config-writer.js` (not `execFile`) ✅
+5. Deployed to Hetzner via `scripts/deploy.sh` — build succeeded, container recreated
+6. Verified deployed JS: `datetime('now')` in state-manager.js ✅, `config-writer` in agent-creator.js ✅
+7. **Test 2 re-run:** `curl POST /webhook/onboarding` with token → HTTP 000 (connection reset) ❌
+8. **Root cause:** Gateway was crash-looping. Previous test had written an agent to `openclaw.json` with invalid schema before the SQLite error killed the request. Three schema violations:
+   - `cpus: '0.5'` (string → should be number)
+   - `pids_limit` (snake_case → should be `pidsLimit`)
+   - `timeoutMs` (not a valid sandbox key)
+9. Searched QMD MCP for correct schema — found `docker.md` and `configuration.md` listing valid keys
+10. **Fixed agent-creator.ts:** `cpus: 0.5` (number), `pidsLimit: 100` (camelCase), removed `timeoutMs`
+11. **Fixed sandbox-validator.ts:** Removed stale `timeoutMs` validation check
+12. TypeScript compiled cleanly
+13. Removed orphan agent (`user_7f0d3241ec4aae7a`) from live config via Node.js script
+14. Restarted container — Gateway starting with cleaned config
+15. User interrupted to request planning file updates (this entry)
+
+**Files changed:**
+- `onboarding/src/services/agent-creator.ts` — Fixed sandbox config schema (3 changes)
+- `onboarding/src/lib/sandbox-validator.ts` — Removed invalid `timeoutMs` check
+- `task_plan.md` — Phase 5 status updated with new root cause + fix
+- `findings.md` — Added Patterns 18 (sandbox schema) and 19 (orphan agent on partial failure)
+- `progress.md` — This entry
+
+**Next steps:**
+- Redeploy with schema fix
+- Re-run Test 2 (webhook with valid token)
+- Verify Gateway doesn't crash after agent creation
+- Verify agent appears in config + DB
+- If all pass → Phase 5 complete → Phase 6
+
+---
+
 ## Session: 2026-02-04 (Phase 4: Sandbox Image Build)
 
 **Timeline of events:**
@@ -236,11 +274,33 @@
   - `task_plan.md` — Marked Phase 4 complete
 
 ### Phase 5: Integration Testing
-- **Status:** pending
-- **Actions taken:**
-  -
+- **Status:** **IN PROGRESS** (2026-02-04, multi-session)
+- **Actions taken (session 1 — earlier today):**
+  1. Delegated to Coder subagent — agent thoroughly researched webhook source code before testing
+  2. **Agent key discovery:** Deployed `agent-creator.js` was OLD (used `execFile`/`npx openclaw agents add` — interactive CLI that hangs). Local source already fixed to use `config-writer.js` (direct JSON config editing).
+  3. SSH connection flaky — `kex_exchange_identification: Connection reset by peer` — transient, retries with 3-5s delay work
+  4. Coder agent hit permission wall (can't run build/deploy commands) — manager took over
+  5. Ran `scripts/deploy.sh` — first attempt failed (SSH reset during rsync), second attempt succeeded
+  6. Verified new code deployed: `head -15 /app/onboarding/dist/services/agent-creator.js` shows `config-writer.js` imports ✅
+  7. **Test 1 PASSED:** `curl POST /webhook/onboarding` without token → `401 {"error":"Missing authorization header"}` ✅
+  8. **Test 2 FAILED:** `curl POST /webhook/onboarding` with valid Bearer token → `500 {"error":"no such column: \"now\""}` ❌
+  9. **Root cause #1 found:** `state-manager.ts:61` — `datetime("now")` uses double quotes (SQLite column identifier). Fixed to backtick template literal.
+  10. TypeScript compiled. Redeploy interrupted by user (token budget).
+- **Actions taken (session 2 — current):**
+  11. Redeployed with SQLite fix — verified `datetime('now')` in deployed JS ✅
+  12. **Test 2 re-run FAILED:** curl HTTP 000 (connection reset) — Gateway crash-looping
+  13. **Root cause #2 found:** agent-creator.ts generates invalid OpenClaw config schema (`cpus` as string, `pids_limit` snake_case, `timeoutMs` invalid key). Previous test had written orphan agent to config.
+  14. Fixed agent-creator.ts (3 schema changes) + sandbox-validator.ts (removed stale check)
+  15. Removed orphan agent from live config via Node.js script
+  16. Restarted container — Gateway running with cleaned config
+  17. Awaiting redeploy with schema fix + re-test
 - **Files created/modified:**
-  -
+  - `onboarding/src/services/state-manager.ts` — Fixed SQLite datetime quote bug (line 61)
+  - `onboarding/src/services/agent-creator.ts` — Fixed sandbox config schema (cpus, pidsLimit, removed timeoutMs)
+  - `onboarding/src/lib/sandbox-validator.ts` — Removed invalid timeoutMs check
+  - `task_plan.md` — Phase 5 status updated, errors logged
+  - `findings.md` — Added Patterns 16-19
+  - `progress.md` — This entry
 
 ### Phase 6: Documentation & Handoff
 - **Status:** pending
@@ -273,11 +333,11 @@
 -->
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 4 complete, ready for Phase 5 (Integration Testing) |
-| Where am I going? | Phases 5-6 remaining (integration test, documentation & handoff) |
+| Where am I? | Phase 5 in progress — SQLite fix deployed, schema fix applied locally, bad agent cleaned from live config, needs redeploy + re-test |
+| Where am I going? | Redeploy with schema fix → re-run Test 2 → verify Gateway stays up + agent in config + row in DB → Phase 6 |
 | What's the goal? | Deploy DonClaudioBot v2 to Hetzner VPS with health verification and sandbox image |
-| What have I learned? | See findings.md - 15 Docker anti-patterns, gog CLI URL discrepancy, sandbox ENTRYPOINT quirk |
-| What have I done? | Phases 0-4 complete: infra, pre-deploy, deploy, WhatsApp auth, Gateway UI fix, sandbox image built on Hetzner |
+| What have I learned? | 19 anti-patterns (findings.md): SQLite double quotes, Docker cache, OpenClaw camelCase schema, orphan agents from partial failures |
+| What have I done? | Phases 0-4 complete. Phase 5: Test 1 passed (401), found+fixed 2 bugs (SQLite quotes, OpenClaw schema), cleaned orphan agent, awaiting final redeploy+test |
 
 ---
 <!--

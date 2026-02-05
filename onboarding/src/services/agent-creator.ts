@@ -59,6 +59,9 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
     backupPath = await backupConfig();
 
     // Step 2: Build agent config and add to openclaw.json
+    const gogKeyringPassword = randomBytes(32).toString('base64url');
+    const gogConfigDir = '/workspace/.gog';
+
     const agentConfig: AgentConfig = {
       id: agentId,
       name: 'User Agent',
@@ -70,9 +73,11 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
         workspaceAccess: 'rw',  // Allow agents to write memory and users to edit their agent files
         docker: {
           image: 'openclaw-sandbox:bookworm-slim',
+          // OpenClaw sets HOME=/workspace during tool execution, so all paths are workspace-relative
+          // docker.env vars are injected via docker exec -e at every tool call (not at container creation)
           env: {
-            GOG_KEYRING_PASSWORD: randomBytes(32).toString('base64url'),
-            GOG_CONFIG_DIR: `/home/node/.openclaw/agents/${agentId}/agent/.gog`,
+            GOG_KEYRING_PASSWORD: gogKeyringPassword,
+            GOG_CONFIG_DIR: gogConfigDir,
             GOG_KEYRING_BACKEND: 'file',
           },
           network: 'bridge',
@@ -80,8 +85,23 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
           cpus: 0.5,
           pidsLimit: 100,
           binds: [
-            '/root/google-credentials/credentials.json:/home/node/.config/gogcli/credentials.json:ro',
+            '/root/google-credentials/credentials.json:/workspace/.config/gogcli/credentials.json:ro',
           ],
+          // setupCommand: Create per-client gog credential profile to avoid read-only bind mount issues
+          // This pre-creates credentials-${agentId}.json so agents can run: gog auth add <email> --client ${agentId}
+          setupCommand: [
+            '# Copy shared OAuth client credentials to writable location',
+            'cp /workspace/.config/gogcli/credentials.json /workspace/.gog/credentials.json',
+            '',
+            '# Create per-client credential profile from the copy',
+            `gog auth credentials set - --client ${agentId} < /workspace/.gog/credentials.json`,
+            '',
+            '# Cleanup temporary copy',
+            'rm /workspace/.gog/credentials.json',
+            '',
+            '# Ensure token directory exists',
+            'mkdir -p /workspace/.config/gogcli/keyring',
+          ].join('\n'),
         },
       },
     };

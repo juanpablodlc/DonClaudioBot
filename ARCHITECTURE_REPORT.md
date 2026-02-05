@@ -12,29 +12,6 @@ DonClaudioBot is a WhatsApp-based multi-user AI assistant service where each use
 
 ---
 
-## v1 Timing Bug (Why v2 Was Needed)
-
-- **Problem:** OAuth happened before sandbox environment existed
-- **Symptom:** User 002+ never worked; tokens stored in wrong location (user001's context)
-- **Root Cause:** Pre-provisioning + migration pattern — OAuth completed in onboarding agent, then tokens migrated to dedicated agent
-- **v1 Commit Thrash:** 17+ commits claimed to fix paths/mounts but never addressed the timing issue
-- **v2 Fix:** Create agent + sandbox config first, add binding, THEN OAuth happens in target agent context
-
-### v1 vs v2 Comparison
-
-| Aspect | v1 (Clawd4All) | v2 (DonClaudioBot) |
-|--------|----------------|-------------------|
-| Agent provisioning | 100 pre-provisioned upfront | Dynamic, on-demand |
-| Onboarding trigger | LLM-driven AGENTS.md | Deterministic service |
-| OAuth timing | Before sandbox config | After sandbox exists |
-| Token storage | Migrated from user001 | In target agent from start |
-| State management | Complex bash scripts | SQLite database |
-| OpenClaw integration | Custom fork | npm dependency |
-| Updates | Merge conflicts | `npm update` |
-| Complexity | High (27 scripts) | Low (~500 lines service) |
-
----
-
 ## Onboarding Flow
 
 1. Unknown WhatsApp message received (Baileys sidecar listeners)
@@ -97,6 +74,41 @@ The onboarding flow has 4 atomic steps: CLI call → config update → gateway r
 
 ---
 
+## Why No Onboarding Agent?
+
+The config template has **zero default agents** and **zero channel-level bindings**. This is intentional.
+
+**Problem**: OpenClaw sessions are "sticky" — once a session is created (e.g., `agent:onboarding:whatsapp:dm:+1555...`), it persists until `/new`, `/reset`, or daily expiry at 4:00 AM. If a user's first message routes to an "onboarding" catch-all agent before the webhook creates their dedicated agent, that session sticks and the user is trapped in the wrong agent.
+
+**Solution**: No catch-all agent exists. The webhook creates the dedicated agent + binding before the message routes. If the webhook is slow and the first message is dropped, the user retries naturally — and by then the binding exists.
+
+| Scenario | Behavior |
+|----------|----------|
+| Normal (webhook fast) | Binding added → message routes to dedicated agent |
+| Webhook slow | No binding → message dropped (no response) |
+| User messages again | Binding exists → routes to dedicated agent |
+
+This trades a possible dropped first message for guaranteed correct routing on all subsequent messages.
+
+---
+
+## Language & Template Routing
+
+New users receive language-appropriate agent templates based on their phone number's country code.
+
+**Config**: `config/phone-language-map.json` maps country codes to template folders:
+```json
+{ "1": "dedicated-en", "44": "dedicated-en", "56": "dedicated-es", ... }
+```
+
+**Detection**: `onboarding/src/lib/language-detector.ts` extracts the country code from E.164 phone numbers using longest-prefix matching (3→2→1 digits). Falls back to `dedicated-es` (Spanish) for unmapped codes.
+
+**Templates**: Each language folder (`config/agents/dedicated-en/`, `config/agents/dedicated-es/`) contains AGENTS.md, SOUL.md, and MEMORY.md with language-appropriate personality and instructions.
+
+**Adding a new language**: Create `config/agents/dedicated-<lang>/` with templates, add one line to `phone-language-map.json`. No code changes needed.
+
+---
+
 ## Key Architectural Decisions
 
 | DP | Resolution | Rationale |
@@ -130,7 +142,6 @@ The onboarding flow has 4 atomic steps: CLI call → config update → gateway r
 | **Sandbox** | `sandbox-validator.ts`, `Dockerfile.sandbox`, `build-sandbox.sh` | ✅ P1-008, P2-001/003/004 (129 LOC) |
 | **Testing** | `__tests__/onboarding.flow.test.ts`, vitest config | ✅ P0-012/014/016, P2-002 (225 LOC) |
 
-**Total LOC:** 1,909 | **Tasks:** 31 | **Verification Steps:** 59
 
 ### Database Schema Summary
 
@@ -275,7 +286,6 @@ graph TD
 
 | Plan | RAM | CPU | Est. Users | Verdict |
 |------|-----|-----|------------|---------|
-| CX22 | 4GB | 2 | ≤5 | ❌ Insufficient |
 | CX32 | 8GB | 2 | ~15 | ✅ Minimum viable |
 | CX42 | 16GB | 4 | ~35 | ✅ Comfortable |
 | CX52 | 32GB | 8 | ~75 | ✅ Headroom |
@@ -294,11 +304,6 @@ docker logs don-claudio-bot | grep "Too many requests"
 # Agent creation events
 docker logs don-claudio-bot | grep "agent created"
 ```
-
-**When to Scale Up:**
-- >20 active users OR sustained >70% memory usage → Upgrade to CX42
-- >50 active users OR CPU saturation → Consider horizontal scaling (multiple VPSes)
-
 ---
 
 ## Dual-Process Architecture
@@ -523,7 +528,8 @@ DonClaudioBot/
 │   │   ├── lib/
 │   │   │   ├── validation.ts       # Zod schemas
 │   │   │   ├── phone-normalizer.ts # E.164 formatting
-│   │   │   └── sandbox-validator.ts # Security checks
+│   │   │   ├── sandbox-validator.ts # Security checks
+│   │   │   └── language-detector.ts # Phone country code → template language
 │   │   ├── db/
 │   │   │   └── schema.sql          # SQLite database schema
 │   │   └── __tests__/
@@ -533,12 +539,13 @@ DonClaudioBot/
 │
 ├── config/                         # OpenClaw configurations
 │   ├── openclaw.json.template      # Base template
+│   ├── phone-language-map.json      # Phone country code → template folder mapping
 │   ├── agents/
-│   │   ├── onboarding/             # Onboarding agent templates
+│   │   ├── dedicated-en/            # English templates (+1, +44, +61, +91)
 │   │   │   ├── AGENTS.md
 │   │   │   ├── SOUL.md
 │   │   │   └── MEMORY.md
-│   │   └── dedicated/              # Dedicated agent templates
+│   │   └── dedicated-es/            # Spanish templates (+56, default)
 │   │       ├── AGENTS.md
 │   │       ├── SOUL.md
 │   │       └── MEMORY.md

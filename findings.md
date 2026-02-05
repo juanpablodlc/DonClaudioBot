@@ -297,6 +297,50 @@ To:
 **Security Consideration:** `'rw'` allows agents to modify their own AGENTS.md/SOUL.md files. This is acceptable for user-owned dedicated agents (users can already edit files via host access).
 **Prevention:** When designing agent workspaces, decide: (a) Read-only instructions + separate memory storage (complex), or (b) Writeable workspace with user trust (simple, Clawd4All v1 approach).
 
+### Pattern 30: OpenClaw Gateway Works With Empty agents.list
+**Discovery:** Gateway does NOT require any agents to start. The absolute minimum config is `{ agent: { workspace: "..." }, channels: { whatsapp: { allowFrom: [...] } } }`.
+**Our Setup:** After removing the onboarding agent, `agents.list: []` and `bindings: []`. The `channels.whatsapp` section is still present and configures the channel.
+**Implication:** Agents and bindings are added dynamically by the webhook/config-writer. Gateway auto-reloads via fs.watch() when agents are added.
+**Reference:** QMD `openclaw-reference/gateway/configuration-examples.md` — "Absolute minimum" example has no agents list.
+**Prevention:** Don't confuse channel config (`channels.whatsapp`) with agent config (`agents.list`). Removing agents doesn't disable channels.
+
+### Pattern 31: Sticky Session Trap — Why No Catch-All Agent
+**Problem:** OpenClaw sessions are sticky — once `agent:onboarding:whatsapp:dm:+1555...` is created, it persists until `/new`, `/reset`, or daily 4 AM expiry. If a catch-all "onboarding" agent catches the first message before the webhook creates the dedicated agent, the user is trapped in the wrong agent.
+**Solution:** Remove the catch-all agent entirely. No `default: true` agents, no channel-level bindings. Only peer-specific bindings (created dynamically).
+**Trade-off:** First message may be dropped if webhook is slow. User retries naturally.
+**Reference:** QMD `openclaw-reference/concepts/session.md` — session key format, sticky behavior, reset triggers.
+**Prevention:** Never add `default: true` agents in multi-user setups with dynamic agent creation. Prefer dropping messages over sticky session traps.
+
+### Pattern 32: gog CLI Hardcodes Client Credentials Path (No Env Var Override)
+**Symptom:** Setting `GOG_CREDENTIALS_PATH` or similar env vars has no effect — gog ignores them
+**Root Cause:** gog CLI hardcodes client credentials at `~/.config/gogcli/credentials.json`. No env var exists to override this path. `GOG_CONFIG_DIR` only affects per-user token storage, NOT client credentials.
+**Fix:** Bind mount the credentials file to the exact path gog expects: `/home/node/.config/gogcli/credentials.json`
+**Prevention:** Always verify via QMD/docs whether a tool supports path overrides before assuming env vars exist.
+
+### Pattern 33: Sandbox Binds Use HOST Paths (Not Container Paths)
+**Symptom:** Bind mount path resolves to empty or wrong directory in sandbox container
+**Root Cause:** OpenClaw Gateway creates sandbox containers via Docker socket. The `binds` array uses host paths resolved by the Docker daemon, not paths inside the main container. Named volume paths like `/home/node/.openclaw/...` are container-internal and don't exist on the host.
+**Fix:** Use actual host filesystem paths (e.g., `/root/google-credentials/`) that the Docker daemon can resolve.
+**Prevention:** For shared data between main container and sandboxes, use host directory mounts (not named volumes) as bind sources.
+
+### Pattern 34: GOG_CONFIG_DIR Must Be Inside Persisted Volume
+**Symptom:** Per-user OAuth tokens lost after container recreation
+**Root Cause:** `GOG_CONFIG_DIR: /home/node/.gog/plus_<phone>` — this path is NOT inside the named volume (`don-claudio-state` at `/home/node/.openclaw/`). Docker containers lose all non-volume data on recreation.
+**Fix:** Changed to `GOG_CONFIG_DIR: /home/node/.openclaw/agents/${agentId}/agent/.gog` — inside the volume, per-agent isolated.
+**Prevention:** Any persistent data in Docker MUST be inside a mounted volume. Always verify paths are within the volume mountpoint.
+
+### Pattern 35: Sandbox Validator Must Match Agent Creator Config
+**Symptom:** `CRITICAL: Workspace must be read-only or none` error on agent creation
+**Root Cause:** `sandbox-validator.ts` rejected `workspaceAccess: 'rw'` but `agent-creator.ts` was already changed to `'rw'` in Phase 8. The validator wasn't updated to match.
+**Fix:** Updated validator to accept all valid values: `'none'`, `'ro'`, `'rw'`
+**Prevention:** When changing config values, grep for validation/assertion code that checks those values.
+
+### Pattern 36: Host Directory Permissions for Docker Mounts
+**Symptom:** `Permission denied` when container user reads bind-mounted file
+**Root Cause:** Directory created with `chmod 700` (root only) but container runs as user 1000. Docker bind mounts preserve host permissions.
+**Fix:** Use `chmod 755` for directory and `chmod 644` for file (world-readable, since credential file is read-only mount anyway)
+**Prevention:** When creating host directories for Docker mounts, consider the container's user. Non-root containers need at least read+execute on directories and read on files.
+
 ---
 
 ## Docker Deployment Checklist (Anti-Pattern Prevention)

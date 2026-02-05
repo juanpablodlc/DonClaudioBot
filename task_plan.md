@@ -17,7 +17,7 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-**🚀 PRODUCTION LIVE** → Phase 5 complete, Fix 1 (reconciliation CLI) complete, Fix 2 (Baileys sidecar) complete, Phase 7 complete (Spanish templates), Phase 8 complete (two-phase onboarding + workspaceAccess 'rw'). All integration tests passed. Baileys sidecar enabled and connected. Automatic WhatsApp onboarding working. New users get dedicated "Don Claudio" agents that collect name/email via conversation.
+**🚀 ALL PHASES COMPLETE** → Phase 9 COMPLETE (Google OAuth credential setup + per-user auth flow). Shared OAuth credentials deployed to Hetzner, sandbox bind mounts configured, GOG_CONFIG_DIR bug fixed, agent templates updated with OAuth instructions (EN+ES). All phases 0-10 complete.
 
 ## Phases
 <!--
@@ -219,6 +219,431 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
 - [x] Ensure users can edit their AGENTS.md/SOUL.md/MEMORY.md files (write permissions enabled)
 - **Status:** **COMPLETE** — workspaceAccess changed to 'rw', MEMORY.md includes onboarding prompt for agents
 
+### Phase 9: Google OAuth Credential Setup & Per-User Auth Flow
+<!--
+  WHAT: Configure shared OAuth client credentials and implement per-user Google authorization flow.
+  WHY: Agents need access to Gmail/Calendar via gogcli, but credentials storage and user auth flow not yet implemented.
+
+  PREREQUISITES:
+  - Google Cloud project created with OAuth client (client_secret_*.json in config/)
+  - Gmail + Calendar APIs enabled
+  - OAuth consent screen configured (Testing mode for <100 users)
+
+  REFERENCES:
+  - gogcli quickstart: https://github.com/steipete/gogcli (README Quick Start section)
+  - OpenClaw sandbox env injection: gateway/sandboxing.md (Sandboxed skills + env vars)
+  - OpenClaw skills system: tools/skills.md (Environment injection per agent run)
+  - Current agent env setup: onboarding/src/services/agent-creator.ts lines 71-75
+-->
+
+#### Requirements
+- [ ] **R1: Shared OAuth client credentials** stored securely and accessible to all sandboxes
+- [ ] **R2: Per-user Google OAuth tokens** isolated by agent (GOG_CONFIG_DIR per phone number)
+- [ ] **R3: User-friendly auth flow** via WhatsApp conversation (agent guides user through manual OAuth)
+- [ ] **R4: Credential security** - client_secret not committed to repo, not exposed in logs
+- [ ] **R5: Idempotent setup** - credentials can be re-run without breaking existing tokens
+
+#### Implementation Tasks
+
+**Task 1: Credential Storage Design**
+- [ ] Decision: Mount host config directory into sandbox (docker bind mount)
+- [ ] Alternative: Bake credentials into sandbox image (less secure - REJECTED)
+- [ ] Chosen approach: Bind mount `/app/config` on host → `/credentials` in sandbox
+- [ ] Benefits: Credentials managed outside image, easy to update, isolated from workspace
+
+**Task 2: Update Docker Compose with Credential Mount**
+- [ ] Add bind mount to `docker/docker-compose.yml`:
+  ```yaml
+  volumes:
+    - don-claudio-state:/home/node/.openclaw
+    - ./config:/credentials:ro  # NEW: Read-only mount for OAuth credentials
+  ```
+- [ ] Security: Read-only mount prevents sandboxes from modifying credentials
+- [ ] Path: Host `./config/client_secret_*.json` → Container `/credentials/client_secret_*.json`
+
+**Task 3: Update Sandbox Environment Variables**
+- [ ] Add `GOG_CREDENTIALS_PATH` to agent-creator.ts sandbox env:
+  ```typescript
+  env: {
+    GOG_KEYRING_PASSWORD: randomBytes(32).toString('base64url'),
+    GOG_CONFIG_DIR: `/home/node/.gog/plus_${phoneNumber.replace('+', '')}`,
+    GOG_CREDENTIALS_PATH: '/credentials',  // NEW: Shared credentials location
+  }
+  ```
+- [ ] Verify: gog respects `GOG_CREDENTIALS_PATH` or uses default location
+- [ ] Fallback: If env var not supported, use symlink in setupCommand
+
+**Task 4: One-Time Credential Setup**
+- [ ] Create `scripts/setup-google-credentials.sh`:
+  ```bash
+  #!/bin/bash
+  # Run once after deployment to configure gog with OAuth client
+  docker exec don-claudio-bot gog auth credentials /credentials/client_secret_*.json
+  ```
+- [ ] Security: Container restart does NOT require re-running (credentials persist in volume)
+- [ ] Verification: `gog auth credentials list` should show the stored client
+
+**Task 5: Per-User OAuth Flow (Agent-Side)**
+- [ ] Update `config/agents/dedicated-es/MEMORY.md` with Google OAuth instructions
+- [ ] Agent detects if `GOG_CONFIG_DIR` has valid tokens (check via `gog auth list`)
+- [ ] If no tokens, agent guides user through manual OAuth:
+  ```
+  1. Agent runs: gog auth add <user_email> --manual
+  2. gog outputs OAuth URL (user copies to their browser)
+  3. User authorizes in browser, gets auth code
+  4. User pastes code back to WhatsApp
+  5. Agent completes auth with code
+  ```
+- [ ] Security: `--manual` mode works in headless sandbox (no browser required)
+
+**Task 6: Update Spanish Template with OAuth Instructions**
+- [ ] Add "🔐 Google OAuth" section to `config/agents/dedicated-es/MEMORY.md`
+- [ ] Include step-by-step instructions for user to authorize Google account
+- [ ] Add troubleshooting: "Si no puedes acceder a Gmail/Calendario..."
+
+#### Verification Steps
+
+**Test 1: Credential Mount Verification**
+- [ ] Deploy updated docker-compose.yml with bind mount
+- [ ] SSH into container: `docker exec don-claudio-bot ls -la /credentials/`
+- [ ] Verify: `client_secret_*.json` is visible and readable
+
+**Test 2: One-Time Credential Setup**
+- [ ] Run `./scripts/setup-google-credentials.sh`
+- [ ] Verify: `docker exec don-claudio-bot gog auth credentials list` shows client
+- [ ] Check output contains: `client_secret_*.apps.googleusercontent.com`
+
+**Test 3: Per-User OAuth Flow (Manual Test)**
+- [ ] Send WhatsApp message to trigger onboarding
+- [ ] Agent responds with welcome message + OAuth instructions
+- [ ] Simulate user: run `gog auth add test@example.com --manual` in container
+- [ ] Copy OAuth URL, verify it points to Google consent screen
+- [ ] (Skip actual auth in test - just verify flow works)
+
+**Test 4: Agent Can Access gog Commands**
+- [ ] After auth, test: `gog gmail labels list` returns user's labels
+- [ ] Test: `gog calendar calendars` returns user's calendars
+- [ ] Verify: No errors about missing credentials or tokens
+
+**Test 5: Token Isolation Between Users**
+- [ ] Create two agents with different phone numbers
+- [ ] Authorize different Google accounts for each
+- [ ] Verify: Agent A cannot access Agent B's Google data
+- [ ] Verify: Different `GOG_CONFIG_DIR` paths per agent
+
+#### Success Criteria
+- [ ] OAuth client credentials accessible from sandbox (bind mount verified)
+- [ ] `gog auth credentials` run successfully (stored in container state)
+- [ ] Agent can guide user through `--manual` OAuth flow (instructions in MEMORY.md)
+- [ ] Authorized agents can access Gmail/Calendar via gog commands
+- [ ] Tokens are isolated per agent (different GOG_CONFIG_DIR)
+- [ ] No credentials committed to git repository (config/ in .gitignore)
+
+#### Security Considerations
+- [ ] **Credential file**: `config/client_secret_*.json` already exists (DO NOT commit)
+- [ ] **Read-only mount**: Sandboxes can read but not modify credentials
+- [ ] **Per-user tokens**: Each agent has unique `GOG_KEYRING_PASSWORD`
+- [ ] **Network isolation**: Sandbox network is `bridge` (required for OAuth), consider `none` after auth
+- [ ] **Audit logging**: Log Google auth events in audit-logger.ts (OPSEC consideration)
+
+#### Rollback Plan
+- [ ] If bind mount fails: Revert docker-compose.yml, use volume copy instead
+- [ ] If env vars don't work: Use setupCommand to symlink credentials to default path
+- [ ] If OAuth flow breaks: Agent can fall back to asking user to run manual auth command via SSH
+- [ ] If tokens leak: Revoke via Google Cloud Console, re-run auth flow
+
+**Status:** **COMPLETE** — Deployed and verified (2026-02-05)
+
+### Phase 10: Multi-Language Agent Templates & Phone-Based Routing
+<!--
+  WHAT: Implement English templates and phone-prefix-based language routing.
+  WHY: Currently ALL users get Spanish templates (hardcoded). Need English for +1 (US/Canada) and scalable system for more languages.
+
+  ROOT CAUSE: agent-creator.ts:102 has hardcoded 'dedicated-es' template path.
+  SOLUTION: Phone prefix → language mapping config, template selection based on phone number.
+
+  CRITICAL ARCHITECTURAL CHANGE: Task 0 removes the misleading "onboarding" agent to prevent "sticky session" problem.
+  See Task 0 for full details with QMD MCP references.
+-->
+
+#### Requirements
+- [ ] **R1: English templates** for US/Canada (+1) users - same structure as dedicated-es
+- [ ] **R2: Phone prefix → language mapping** in config file (scalable for future countries)
+- [ ] **R3: Template selection logic** in agent-creator.ts based on phone number
+- [ ] **R4: Default fallback language** for unmapped countries (Spanish = current default)
+- [ ] **R5: Graceful degradation** - missing templates log warning but don't fail
+
+#### Design Decisions
+
+**Decision 1: Mapping Format**
+- Chosen: Simple JSON config file `config/phone-language-map.json`
+- Rejected: Database table (overkill), env var (not scalable), code switch (not maintainable)
+- Rationale: JSON is easy to edit, version control, no migration needed
+
+**Decision 2: Default Language**
+- Chosen: Spanish (es) as default
+- Rationale: Current system is Spanish-first, matches Chile origin
+
+**Decision 3: Template Folder Structure**
+```
+config/agents/
+├── dedicated-en/     # NEW: English templates (+1, +44, etc)
+│   ├── AGENTS.md
+│   ├── SOUL.md
+│   └── MEMORY.md
+├── dedicated-es/     # EXISTING: Spanish templates (+56, default)
+│   ├── AGENTS.md
+│   ├── SOUL.md
+│   └── MEMORY.md
+└── phone-language-map.json  # NEW: Mapping config
+```
+
+#### Implementation Tasks
+
+**Task 0: Remove "Onboarding Agent" to Prevent Sticky Session Problem (CRITICAL PREREQUISITE)**
+
+<!--
+  WHY THIS TASK EXISTS:
+  The "onboarding" agent in config/openclaw.json.template is a TRAP that causes users to get
+  "stuck" in the wrong agent due to OpenClaw's session behavior. This task removes it entirely.
+
+  PROBLEM DESCRIPTION (with QMD MCP references):
+  Search terms used: "session sticky routing dmScope per-channel-peer message"
+
+  From OpenClaw docs (openclaw-reference/concepts/session.md):
+  - Session key format with dmScope: "per-channel-peer" is:
+    agent:<agentId>:<channel>:dm:<peerId>
+    Example: agent:user002:whatsapp:dm:+15551234567
+
+  - Sessions are "sticky" - once created, they persist until reset:
+    * Reset triggers: /new, /reset, or daily expiry (4:00 AM gateway time)
+    * Direct chats follow session.dmScope setting
+    * "per-channel-peer" isolates by channel + sender (recommended for multi-user inboxes)
+
+  From Clawd4All v1 analysis (Clawd4All/onboarding-issues-summary.md):
+  - Documented problem: "After binding is created, user's messages should route to user002
+    via binding, NOT to user001"
+  - Users got "stuck" in user001 (onboarding agent) even after their dedicated agent was claimed
+  - Required explicit /new command from users to switch sessions
+
+  THE RACE CONDITION:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ T+0ms:   WhatsApp message arrives                            │
+  │ T+1ms:   Baileys sidecar detects unknown phone               │
+  │ T+2ms:   Baileys triggers webhook POST /webhook/onboarding   │
+  │ T+2ms:   **RACE**: Baileys may forward message to Gateway    │
+  │          ┌─────────────────────────────────────────────┐     │
+  │          │ If message routes NOW:                        │     │
+  │          │   No binding exists → routes to onboarding    │     │
+  │          │   Session created: agent:onboarding:whatsapp... │
+  │          │   This session STICKS forever (or until /new) │     │
+  │          └─────────────────────────────────────────────┘     │
+  │          ↓ if webhook completes FIRST                        │
+  │ T+50ms:  Agent created, binding added                        │
+  │ T+60ms:  Gateway reloads via fs.watch()                      │
+  │          NOW message routes to new dedicated agent            │
+  └─────────────────────────────────────────────────────────────┘
+
+  CURRENT DONCLAUDIOBOT V2 FLOW:
+  1. Unknown WhatsApp message → Baileys sidecar detects it
+  2. Baileys calls POST /webhook/onboarding (synchronous - waits for response)
+  3. Webhook creates dedicated agent via agent-creator.ts
+  4. Webhook adds phone→agentId binding to openclaw.json
+  5. Gateway auto-reloads via fs.watch() (~1-10ms delay)
+  6. **When does original message route?** Uncertain - depends on timing
+
+  THE "onboarding" AGENT IN TEMPLATE:
+  - Has "default": true (catches unmatched messages)
+  - Has channel-level binding (no peer field = catch-all)
+  - Has EMPTY/PLACEHOLDER templates (AGENTS.md, SOUL.md, MEMORY.md)
+  - Is NEVER used for actual onboarding logic (webhook does everything)
+  - EXISTS ONLY IN TEMPLATE - not used in actual production flow
+
+  DECISION: REMOVE THE ONBOARDING AGENT ENTIRELY
+
+  Rationale:
+  1. It's misleading - suggests intake agent pattern that doesn't exist
+  2. Creates "sticky session" trap if race condition is lost
+  3. Has no actual purpose in v2 architecture (webhook-based flow)
+  4. Better to drop first message than to trap user in wrong agent
+  5. Users will naturally retry if first message gets no response
+
+  Alternative considered and rejected:
+  - "Implement onboarding agent properly with welcome message"
+  - Rejected: Still creates session that user has to switch from
+  - Rejected: Adds complexity without solving core problem
+  - Rejected: User experience: "Welcome! Oh wait, send /new to talk to your agent"
+
+  Updated flow after removal:
+  | Scenario | Behavior |
+  |----------|----------|
+  | Normal (webhook fast) | Binding added → message routes to dedicated agent ✅ |
+  | Webhook slow/failed | No binding → message dropped (no response) |
+  | User messages again | Binding exists → routes to dedicated agent ✅ |
+
+  Acceptable tradeoff: First message might be dropped, but no "stuck in wrong agent" problem.
+-->
+
+**Subtask 0.1: Remove onboarding agent from config template**
+- [ ] Edit `config/openclaw.json.template`:
+  - Remove entire "onboarding" agent from `agents.list[]` array
+  - Remove `default: true` from all agents (no catch-all agent)
+  - Remove channel-level binding for "onboarding" from `bindings[]` array
+  - Verify `session.dmScope: "per-channel-peer"` is still set
+- [ ] Result: Template has NO default agent, only per-peer bindings (created dynamically)
+
+**Subtask 0.2: Remove onboarding template files**
+- [ ] Delete `config/agents/onboarding/` directory entirely:
+  - AGENTS.md (placeholder)
+  - SOUL.md (placeholder)
+  - MEMORY.md (intentionally empty)
+- [ ] Rationale: These are placeholders, never used, misleading to keep
+
+**Subtask 0.3: Update documentation**
+- [ ] Update ARCHITECTURE_REPORT.md:
+  - Add section "Why No Onboarding Agent?" with race condition explanation
+  - Document session key format: agent:<agentId>:whatsapp:dm:<peerId>
+  - Reference QMD MCP: openclaw-reference/concepts/session.md
+  - Explain "sticky session" problem and why removal is correct
+- [ ] Update findings.md: Document pattern about OpenClaw sessions
+- [ ] Add to .gitignore if needed: No changes needed
+
+**Subtask 0.4: Verification (MUST PASS)**
+- [ ] Verify template has no "default": true agents
+- [ ] Verify template has no channel-level bindings (only peer-specific ones)
+- [ ] Test: npx openclaw config validate config/openclaw.json.template passes
+- [ ] Document: First message may be dropped if webhook is slow
+- [ ] Document: Users will naturally retry, no action needed
+
+**Subtask 0.5: Production deployment notes**
+- [ ] Existing production agents are NOT affected (already have bindings)
+- [ ] Only affects NEW users (no binding exists yet)
+- [ ] No migration needed (onboarding agent was never used in production)
+- [ ] WhatsApp auth persists in volume (not affected)
+
+**Success Criteria:**
+- [ ] Template has zero agents with "default": true
+- [ ] Template has zero channel-level bindings (only peer bindings)
+- [ ] npx openclaw config validate passes
+- [ ] Documentation explains "sticky session" problem
+- [ ] Future agents reading this understand WHY onboarding agent was removed
+
+**References for future agents:**
+- QMD MCP search: "session sticky routing dmScope per-channel-peer"
+- QMD MCP search: "session key format agent dmScope isolated"
+- OpenClaw docs: openclaw-reference/concepts/session.md (read this!)
+- Clawd4All analysis: Clawd4All/onboarding-issues-summary.md (v1 lessons learned)
+
+---
+
+**Task 1: Create phone-language-map.json**
+- [ ] Create `config/phone-language-map.json`:
+  ```json
+  {
+    "description": "Maps phone country codes to template language folders. Add new languages as: \"<country_code>\": \"dedicated-<lang>\"",
+    "default": "dedicated-es",
+    "mappings": {
+      "1": "dedicated-en",
+      "44": "dedicated-en",
+      "56": "dedicated-es",
+      "61": "dedicated-en",
+      "91": "dedicated-en"
+    }
+  }
+  ```
+- [ ] Add comments explaining format
+- [ ] Document in ARCHITECTURE_REPORT.md
+
+**Task 2: Create English Templates (dedicated-en/)**
+- [ ] Create `config/agents/dedicated-en/AGENTS.md`:
+  - Same structure as dedicated-es
+  - English instructions for Gmail/Calendar/productivity
+  - Variables: {{USER_NAME}}, {{USER_EMAIL}}, {{PHONE_NUMBER}}
+- [ ] Create `config/agents/dedicated-en/SOUL.md`:
+  - Personality: Professional but warm (like Don Claudio but English)
+  - Agent name: "Mr Botly" (avoids copyright, friendly)
+  - Tone: Concise, proactive, courteous
+- [ ] Create `config/agents/dedicated-en/MEMORY.md`:
+  - User data structure
+  - Onboarding flow (same placeholder detection as Spanish)
+  - English welcome message
+
+**Task 3: Language Detection Function**
+- [ ] Create `onboarding/src/lib/language-detector.ts`:
+  ```typescript
+  export function detectLanguage(phone: string): string {
+    // Extract country code: +1555... → "1"
+    // Read phone-language-map.json
+    // Return mapped folder or default
+  }
+  ```
+- [ ] Unit tests: +1 → dedicated-en, +56 → dedicated-es, +999 → default
+- [ ] Handle edge cases: malformed phone, missing config
+
+**Task 4: Update agent-creator.ts**
+- [ ] Import detectLanguage function
+- [ ] Replace line 102 hardcoded 'dedicated-es' with:
+  ```typescript
+  const { detectLanguage } = await import('../lib/language-detector.js');
+  const languageFolder = detectLanguage(phoneNumber);
+  const templateDir = join(process.cwd(), 'config', 'agents', languageFolder);
+  ```
+- [ ] Add log message: `[agent-creator] Using template: ${languageFolder} for ${phoneNumber}`
+- [ ] Verify graceful degradation (existing try/catch handles missing templates)
+
+**Task 5: Documentation Updates**
+- [ ] Update ARCHITECTURE_REPORT.md:
+  - Add section "Language & Template Routing"
+  - Document phone-language-map.json format
+  - Add to "Project Structure" section
+- [ ] Update task_plan.md: Mark Phase 10 tasks as above
+- [ ] Add to .gitignore: `config/phone-language-map.json` if it contains sensitive info (not needed - just country codes)
+
+#### Verification Steps
+
+**Test 1: English User (+1)**
+- [ ] Trigger onboarding with phone +15551234567
+- [ ] Verify log: "Using template: dedicated-en"
+- [ ] Check agent workspace: AGENTS.md is English
+- [ ] Send first message: Agent responds in English
+
+**Test 2: Spanish User (+56)**
+- [ ] Trigger onboarding with phone +56912345678
+- [ ] Verify log: "Using template: dedicated-es"
+- [ ] Check agent workspace: AGENTS.md is Spanish
+- [ ] Send first message: Agent responds in Spanish
+
+**Test 3: Unmapped Country (uses default)**
+- [ ] Trigger onboarding with phone +99999999999
+- [ ] Verify log: "Using template: dedicated-es" (default)
+- [ ] Check agent workspace: Spanish templates used
+
+**Test 4: Invalid/Missing Config**
+- [ ] Delete phone-language-map.json temporarily
+- [ ] Trigger onboarding
+- [ ] Verify: Falls back to default, logs warning, doesn't crash
+
+**Test 5: TypeScript Compilation**
+- [ ] npm run build succeeds
+- [ ] No type errors in language-detector.ts
+- [ ] agent-creator.ts imports work correctly
+
+#### Success Criteria
+- [ ] +1 phone numbers get English templates
+- [ ] +56 phone numbers get Spanish templates
+- [ ] Unmapped countries get Spanish default
+- [ ] Config file addition requires no code changes
+- [ ] Missing config file doesn't crash onboarding
+- [ ] All existing functionality preserved
+
+#### Future Extensibility
+To add a new language (e.g., Portuguese for +55 Brazil):
+1. Create `config/agents/dedicated-pt/` folder with templates
+2. Add one line to phone-language-map.json: `"55": "dedicated-pt"`
+3. No code deployment needed, just config file update
+
+**Status:** **COMPLETE** — All tasks implemented, TypeScript compiles, ready for deployment
+
 ## Key Questions
 <!--
   WHAT: Important questions you need to answer during the task.
@@ -232,6 +657,26 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
 6. **Have I searched QMD MCP for ALL env vars and config I'm using?** (MANDATORY before deploy)
 7. **Have I validated the template locally?** (npx openclaw config validate)
 8. **Is this my 3rd+ deployment attempt?** (If yes, STOP and follow 3-Strike Protocol)
+
+### Phase 10 Specific Questions (Multi-Language Templates)
+14. **~What should the English agent be named?~** ✅ **DECIDED: "Mr Botly"** (avoids copyright, friendly name)
+15. **~Should we add more country codes now?~** ✅ **DECIDED: Yes** - Added +44 (UK), +61 (Australia), +91 (India) all → dedicated-en
+16. **~Should the "onboarding" agent be removed from config?~** ✅ **DECIDED: Yes, remove entirely** - See Task 0 for detailed reasoning with QMD MCP references about sticky session problem
+17. **~Should we support language preference override?~** ✅ **DECIDED: No** - Let agent handle conversationally if user prefers different language
+18. **~How do we handle edge cases like +1 but user speaks Spanish?~** ✅ **DECIDED: Option B** - Agent adapts in conversation (user can say "hablo español", agent switches or offers to switch templates)
+
+**Additional Questions from Task 0:**
+19. **Will first message be dropped?** Possibly, if webhook is slow. User will retry naturally. Better than trapping user in wrong agent.
+20. **Do we need an onboarding agent at all?** No - v2 uses webhook-based flow, not intake agent pattern like Clawd4All v1.
+21. **What if user gets stuck in wrong session?** This is WHY we're removing the onboarding agent - to prevent this exact problem.
+
+### Phase 9 Specific Questions (Google OAuth)
+9. **Does gog respect `GOG_CREDENTIALS_PATH` env var?** If not, need symlink approach in setupCommand.
+10. **What is the exact OAuth client ID?** (For .gitignore pattern and verification)
+11. **Does `gog auth add --manual` work without network access?** Sandbox has `network: bridge` - required for OAuth.
+12. **Are Gmail + Calendar APIs enabled in Google Cloud project?** Verify before deploying.
+13. **Is OAuth consent screen in "Testing" mode?** If no, must add users as test users manually.
+14. **Should credentials be in a named volume instead of bind mount?** Trade-off: convenience vs security.
 
 ## Decisions Made
 <!--
@@ -248,6 +693,30 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
 | **ENV VAR NAMING:** Use `OPENCLAW_GATEWAY_TOKEN` | OpenClaw standard (32 doc matches) - was using wrong var name |
 | **TEMPLATE FIX:** Update schema only | Changed `gateway.token` → `gateway.auth.token`, kept rest |
 | **STOP at circular debugging** | 3-Strike Error Protocol - pause and reassess approach |
+
+### Phase 10 Decisions (Multi-Language Templates)
+| Decision | Rationale |
+|----------|-----------|
+| **REMOVE "onboarding" agent entirely** (Task 0) | Prevents "sticky session" trap - users getting stuck in wrong agent due to OpenClaw session behavior. See detailed reasoning in Task 0 with QMD MCP references. |
+| **English agent name: "Mr Botly"** | Avoids copyright issues, friendly and memorable name for users |
+| **More English country codes: +1, +44, +61, +91** | Covers US/Canada, UK, Australia, India - major English-speaking regions |
+| **JSON config for phone→language mapping** | Easy to edit, version controlled, no database needed, no code deployment for new languages |
+| **Spanish as default language** | Current system is Spanish-first, matches Chile origin, fallback for unmapped countries |
+| **Folder-based template structure** (`dedicated-en`, `dedicated-es`) | Matches current pattern, easy to add new languages as new folders |
+| **Graceful degradation on missing config** | System continues working with default if config file missing, logs warning for admin |
+| **Language detection in dedicated function** | Keeps agent-creator.ts clean, testable in isolation, easy to extend |
+| **No manual language override** | Simpler system - let agent handle conversationally if user prefers different language (e.g., +1 user speaks Spanish) |
+| **Accept first message may be dropped** | Better than trapping user in wrong "sticky" session. Users will naturally retry. |
+
+### Phase 9 Decisions (Google OAuth)
+| Decision | Rationale |
+|----------|-----------|
+| **Bind mount for credentials** (`./config:/credentials:ro`) | Easiest setup: credentials managed on host, read-only for security, easy to update without rebuilding image |
+| **One-time `gog auth credentials` setup** | Shared OAuth client used by all agents; only needs to run once after deployment |
+| **Per-user `GOG_CONFIG_DIR`** (already implemented) | Isolates OAuth tokens per agent; each phone number gets unique directory |
+| **Manual OAuth flow (`--manual` flag)** | Sandboxes are headless (no browser); agent guides user to copy-paste auth code |
+| **Agent-side auth instructions in MEMORY.md** | Users self-service through WhatsApp conversation; no admin intervention needed per user |
+| **Sandbox network: `bridge` (required)** | OAuth flow needs network access to Google; `none` would block auth |
 
 ## Prevention Rules
 <!--

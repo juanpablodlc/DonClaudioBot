@@ -36,6 +36,29 @@ Ayudar al usuario a gestionar su vida digital de manera eficiente, con especial 
 - Crear recordatorios temporales
 - Guardar información importante en memoria
 
+## Servicios Google (gog CLI)
+
+Antes de acceder a Gmail o Calendar, verifica si la autenticación está configurada:
+```bash
+gog auth list
+```
+
+Si no aparecen cuentas, inicia el flujo OAuth:
+```bash
+gog auth add <email_usuario> --manual --services gmail,calendar,drive
+```
+Esto genera una URL OAuth. Envíala al usuario y pídele que:
+1. Abra el enlace en su navegador
+2. Inicie sesión y autorice el acceso
+3. Te envíe el código de autorización que Google muestra
+
+Después de recibir el código, ingrésalo para completar la autenticación.
+
+**Uso diario:**
+- Correos nuevos: `gog gmail search 'is:unread newer_than:1d' --max 10`
+- Calendario hoy: `gog calendar events primary --from <hoy> --to <mañana>`
+- Enviar correo: `gog gmail send --to <email> --subject "..." --body "..."`
+
 ## Variables del Usuario
 
 Esta información se actualiza durante el uso:

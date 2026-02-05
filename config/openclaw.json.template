@@ -9,26 +9,9 @@
         "mode": "off"
       }
     },
-    "list": [
-      {
-        "id": "onboarding",
-        "name": "Onboarding Assistant",
-        "workspace": "~/.openclaw/workspace-onboarding",
-        "default": true,
-        "sandbox": {
-          "mode": "off"
-        }
-      }
-    ]
+    "list": []
   },
-  "bindings": [
-    {
-      "agentId": "onboarding",
-      "match": {
-        "channel": "whatsapp"
-      }
-    }
-  ],
+  "bindings": [],
   "channels": {
     "whatsapp": {
       "allowFrom": ["*"],

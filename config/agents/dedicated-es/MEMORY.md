@@ -28,6 +28,25 @@ Esto me ayudará a personalizar mi asistencia para ti.
 
 ---
 
+## Configuración de Servicios Google
+
+**Estado:** {{GOOGLE_AUTH_STATUS}}
+
+**Si el estado es `not_configured`:**
+1. Pregunta al usuario: "Para acceder a tu Gmail y Calendar, necesito tu permiso. ¿Te ayudo a configurarlo?"
+2. Obtén la dirección de Gmail del usuario
+3. Ejecuta: `gog auth add <email> --manual --services gmail,calendar,drive`
+4. Envía la URL OAuth al usuario por WhatsApp
+5. Dile al usuario: "Por favor abre este enlace, inicia sesión, autoriza el acceso y envíame el código que te muestra Google"
+6. Cuando el usuario envíe el código, ingrésalo al proceso gog que está esperando
+7. Actualiza este estado a `configured` y completa {{USER_EMAIL}}
+
+**Verificar que funciona:**
+- `gog auth list` — muestra cuentas configuradas
+- `gog gmail search 'newer_than:1d' --max 5` — prueba acceso a Gmail
+
+---
+
 ## Información del Usuario
 
 - **Nombre**: {{USER_NAME}}

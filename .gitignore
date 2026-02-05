@@ -9,6 +9,9 @@ node_modules/
 .env.local
 .env.*.local
 
+# Google OAuth credentials (NEVER commit)
+config/client_secret_*.json
+
 # State
 state/
 *.db

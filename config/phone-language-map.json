@@ -1,0 +1,11 @@
+{
+  "description": "Maps phone country codes to template language folders. Add new languages as: \"<country_code>\": \"dedicated-<lang>\"",
+  "default": "dedicated-es",
+  "mappings": {
+    "1": "dedicated-en",
+    "44": "dedicated-en",
+    "56": "dedicated-es",
+    "61": "dedicated-en",
+    "91": "dedicated-en"
+  }
+}

@@ -17,6 +17,8 @@ services:
 
       # Docker socket for sandbox containers (privileged operations)
       - /var/run/docker.sock:/var/run/docker.sock
+      # Google OAuth client credentials (shared, read-only)
+      - /root/google-credentials:/home/node/.config/gogcli:ro
     environment:
       - NODE_ENV=production
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-change-me}

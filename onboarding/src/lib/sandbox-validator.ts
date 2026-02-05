@@ -36,9 +36,10 @@ export function validateSandboxConfig(config: AgentConfig): void {
     throw new Error(error);
   }
 
-  // 4. Ensure read-only workspace
-  if (sandbox.workspaceAccess !== 'ro' && sandbox.workspaceAccess !== 'none') {
-    const error = 'CRITICAL: Workspace must be read-only or none';
+  // 4. Validate workspace access (rw allowed for memory flush and user edits - Phase 8)
+  const validAccess = ['none', 'ro', 'rw'];
+  if (!validAccess.includes(sandbox.workspaceAccess)) {
+    const error = `CRITICAL: Invalid workspaceAccess: ${sandbox.workspaceAccess}`;
     console.error(`[sandbox-validator] ${error}`);
     throw new Error(error);
   }

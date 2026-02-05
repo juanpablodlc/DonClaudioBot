@@ -31,6 +31,7 @@ export interface AgentConfig {
       privileged?: boolean;
       capDrop?: string[];
       binds?: string[];
+      setupCommand?: string;
     };
   };
 }
@@ -71,12 +72,16 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
           image: 'openclaw-sandbox:bookworm-slim',
           env: {
             GOG_KEYRING_PASSWORD: randomBytes(32).toString('base64url'),
-            GOG_CONFIG_DIR: `/home/node/.gog/plus_${phoneNumber.replace('+', '')}`,
+            GOG_CONFIG_DIR: `/home/node/.openclaw/agents/${agentId}/agent/.gog`,
+            GOG_KEYRING_BACKEND: 'file',
           },
           network: 'bridge',
           memory: '512m',
           cpus: 0.5,
           pidsLimit: 100,
+          binds: [
+            '/root/google-credentials/credentials.json:/home/node/.config/gogcli/credentials.json:ro',
+          ],
         },
       },
     };
@@ -96,10 +101,12 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
     // Step 6: Create agent state directory
     await mkdir(agentConfig.agentDir!, { recursive: true });
 
-    // Step 7: Copy Spanish "Don Claudio" template files to workspace
-    // Templates are located at config/agents/dedicated-es/ relative to project root
+    // Step 7: Copy language-appropriate template files to workspace
     const { join } = await import('path');
-    const templateDir = join(process.cwd(), 'config', 'agents', 'dedicated-es');
+    const { detectLanguage } = await import('../lib/language-detector.js');
+    const languageFolder = detectLanguage(phoneNumber);
+    console.log(`[agent-creator] Using template: ${languageFolder} for ${phoneNumber}`);
+    const templateDir = join(process.cwd(), 'config', 'agents', languageFolder);
     const templateFiles = ['AGENTS.md', 'SOUL.md', 'MEMORY.md'];
 
     for (const file of templateFiles) {

@@ -1,5 +1,126 @@
 # Progress Log
 
+## Session: 2026-02-05 (Phase 9 COMPLETE - Google OAuth Credential Setup)
+
+**Timeline of events:**
+1. Loaded Karpathy skill, read task_plan.md, findings.md, progress.md, ARCHITECTURE_REPORT.md, last 5 commits
+2. Identified Phase 9 as next pending phase (Google OAuth credential setup)
+3. **QMD Research (Documentation First):**
+   - Confirmed `gog` hardcodes client credentials at `~/.config/gogcli/credentials.json` (no env var override)
+   - Confirmed `GOG_CONFIG_DIR` only affects per-user token storage
+   - Confirmed OpenClaw sandbox `binds` use host paths (Docker daemon resolves them)
+   - Studied Clawd4All v1 OAuth architecture for patterns
+4. **Critical Bug Fix: GOG_CONFIG_DIR path**
+   - OLD: `/home/node/.gog/plus_${phone}` (OUTSIDE volume, tokens lost on container recreation)
+   - NEW: `/home/node/.openclaw/agents/${agentId}/agent/.gog` (inside volume, persistent)
+5. **Added GOG_KEYRING_BACKEND: 'file'** — required for headless Docker (no system keyring)
+6. **Added binds array to sandbox config:**
+   - `/root/google-credentials/credentials.json:/home/node/.config/gogcli/credentials.json:ro`
+   - Gives every sandbox container read-only access to shared OAuth client credentials
+7. **Updated docker-compose.yml** with `/root/google-credentials:/home/node/.config/gogcli:ro`
+8. **Created `scripts/setup-google-credentials.sh`** — copies client_secret to Hetzner host
+9. **Updated agent templates (EN+ES):**
+   - MEMORY.md: Added "Google Services Setup" section with OAuth flow instructions
+   - AGENTS.md: Added "Google Services (gog CLI)" section with auth check and daily usage
+10. **Fixed sandbox-validator.ts** — was rejecting `workspaceAccess: 'rw'` (set in Phase 8 but validator not updated)
+11. **Deployed to Hetzner** — credentials setup + code deploy + verification
+12. **Webhook test:** Created agent `user_b6038c90694094fd` with +1 phone → `dedicated-en` template
+    - Config verified: correct GOG_CONFIG_DIR, GOG_KEYRING_BACKEND, binds array
+    - Templates verified: AGENTS.md and MEMORY.md contain Google OAuth sections
+    - Container healthy, Baileys sidecar connected
+
+**Files created:**
+- `scripts/setup-google-credentials.sh` (30 lines)
+
+**Files modified:**
+- `onboarding/src/services/agent-creator.ts` — Fixed GOG_CONFIG_DIR, added GOG_KEYRING_BACKEND + binds
+- `onboarding/src/lib/sandbox-validator.ts` — Accept 'rw' workspaceAccess
+- `docker/docker-compose.yml` — Added credentials mount
+- `config/agents/dedicated-en/MEMORY.md` — Added Google Services Setup section
+- `config/agents/dedicated-es/MEMORY.md` — Same in Spanish
+- `config/agents/dedicated-en/AGENTS.md` — Added gog CLI section
+- `config/agents/dedicated-es/AGENTS.md` — Same in Spanish
+
+**Key verification results:**
+- Credentials accessible in main container: `cat /home/node/.config/gogcli/credentials.json` shows valid JSON
+- Deployed agent-creator.js has correct GOG_CONFIG_DIR, binds, and GOG_KEYRING_BACKEND
+- New agent config has `binds: ['/root/google-credentials/...']` and correct env vars
+- Template copy shows Google OAuth instructions in workspace
+- Health check: `{"status":"ok"}`
+- Baileys sidecar: Connected
+
+**Findings documented (Patterns 32-36):**
+- Pattern 32: gog CLI hardcodes client credentials path
+- Pattern 33: Sandbox binds use HOST paths
+- Pattern 34: GOG_CONFIG_DIR must be inside persisted volume
+- Pattern 35: Sandbox validator must match agent creator config
+- Pattern 36: Host directory permissions for Docker mounts
+
+**Next steps:**
+- All phases 0-10 complete
+- Test end-to-end OAuth flow with real WhatsApp user
+- Add user to Google Cloud Console test users before OAuth
+
+---
+
+## Session: 2026-02-04 (Phase 10 COMPLETE - Multi-Language Templates + Phone Routing)
+
+**Timeline of events:**
+1. Loaded Karpathy skill, read task_plan.md, findings.md, ARCHITECTURE_REPORT.md, last 5 commits
+2. Identified Phase 10 as next pending phase (6 tasks)
+3. **Task 0: Removed onboarding agent from config template**
+   - Removed "onboarding" agent from `agents.list[]` (catch-all that caused sticky sessions)
+   - Removed channel-level binding for onboarding agent
+   - Deleted `config/agents/onboarding/` placeholder directory
+   - Deleted `config/agents/dedicated/` stale placeholder directory
+   - Verified: `channels.whatsapp` still present (WhatsApp channel config is separate from agents)
+   - Verified via QMD: OpenClaw Gateway starts fine with empty `agents.list` (absolute minimum only needs `agent.workspace` + `channels`)
+4. **Task 1: Created `config/phone-language-map.json`**
+   - Mappings: +1/+44/+61/+91 → dedicated-en, +56 → dedicated-es, default → dedicated-es
+5. **Task 2: Created English "Mr Botly" templates**
+   - `config/agents/dedicated-en/AGENTS.md` - English instructions, {{USER_NAME}} etc.
+   - `config/agents/dedicated-en/SOUL.md` - Professional but warm personality
+   - `config/agents/dedicated-en/MEMORY.md` - English onboarding flow with placeholder detection
+6. **Task 3: Created `onboarding/src/lib/language-detector.ts`**
+   - Reads phone-language-map.json (cached after first read)
+   - Extracts country code via longest-prefix matching (3→2→1 digits)
+   - Graceful fallback to dedicated-es if config missing
+7. **Task 4: Updated `agent-creator.ts`**
+   - Replaced hardcoded `'dedicated-es'` with `detectLanguage(phoneNumber)`
+   - Added log: `[agent-creator] Using template: ${languageFolder} for ${phoneNumber}`
+8. **Task 5: TypeScript compilation** — zero errors
+9. **Documentation updates:**
+   - ARCHITECTURE_REPORT.md: Added "Why No Onboarding Agent?" and "Language & Template Routing" sections, updated project structure
+   - task_plan.md: Phase 10 marked COMPLETE
+
+**Files created:**
+- `config/phone-language-map.json` (10 lines)
+- `config/agents/dedicated-en/AGENTS.md` (52 lines)
+- `config/agents/dedicated-en/SOUL.md` (58 lines)
+- `config/agents/dedicated-en/MEMORY.md` (64 lines)
+- `onboarding/src/lib/language-detector.ts` (62 lines)
+
+**Files modified:**
+- `config/openclaw.json.template` — Removed onboarding agent + binding
+- `onboarding/src/services/agent-creator.ts` — detectLanguage() instead of hardcoded path
+- `ARCHITECTURE_REPORT.md` — New sections + project structure update
+- `task_plan.md` — Phase 10 marked COMPLETE
+
+**Files deleted:**
+- `config/agents/onboarding/` (AGENTS.md, SOUL.md, MEMORY.md — all placeholders)
+- `config/agents/dedicated/` (AGENTS.md, SOUL.md, MEMORY.md — stale placeholders)
+
+**Key verification:**
+- Template still has `channels.whatsapp` config (lines 15-19) — WhatsApp works
+- QMD confirms Gateway needs no agents to start (absolute minimum is `agent.workspace` + `channels`)
+- Empty `agents.list` + `bindings` is correct — agents are added dynamically by webhook
+
+**Next steps:**
+- Deploy to production (template change only affects fresh volumes — existing server unaffected)
+- Phase 9: Google OAuth credential setup
+
+---
+
 ## Session: 2026-02-04 (Phase 8 COMPLETE - Two-Phase Onboarding + workspaceAccess Fix)
 
 **Timeline of events:**
@@ -547,11 +668,11 @@ How to allow memory writes + user edits while maintaining security?
 -->
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 6 in progress — All integration tests passed (webhook auth, agent creation, Gateway stability, config reload)
-| Where am I going? | Complete Phase 6: Documentation & Handoff → mark P0-DEPLOY-009 and P1-DEPLOY-010 complete → deployment done
+| Where am I? | Phase 10 complete — Multi-language templates + phone routing + onboarding agent removed
+| Where am I going? | Phase 9: Google OAuth credential setup (PENDING — needs Google Cloud project)
 | What's the goal? | Deploy DonClaudioBot v2 to Hetzner VPS with health verification and sandbox image |
-| What have I learned? | 20 anti-patterns (findings.md): SQLite double quotes, Docker cache, OpenClaw camelCase schema, orphan agents, two-bug interactions
-| What have I done? | Phases 0-5 complete. Phase 5: Fixed 2 bugs (SQLite quotes, OpenClaw sandbox schema), verified end-to-end onboarding flow works |
+| What have I learned? | 31 anti-patterns (findings.md): sticky sessions, empty agents list OK, Docker cache, OpenClaw camelCase schema, template ≠ volume config
+| What have I done? | Phases 0-8, 10 complete. Phase 10: English "Mr Botly" templates, language-detector.ts, phone-language-map.json, removed onboarding agent |
 
 ---
 <!--

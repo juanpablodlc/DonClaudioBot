@@ -25,13 +25,23 @@ if [ ! -f "$CONFIG_PATH" ]; then
 else
     echo "[entrypoint] Config exists: $CONFIG_PATH"
 
-    # Verify dmScope is correct (defensive check)
+    # Ensure dmScope is set (volumes created before this setting exist without it)
     if grep '"dmScope"[[:space:]]*:[[:space:]]*"per-channel-peer"' "$CONFIG_PATH" > /dev/null 2>&1; then
         echo "[entrypoint] Config verified: dmScope=per-channel-peer ✓"
     else
-        echo "[entrypoint] WARNING: dmScope is not set to 'per-channel-peer'!"
-        echo "[entrypoint] This may cause sticky session bug. Current config:"
-        grep -A 2 '"session"' "$CONFIG_PATH" || true
+        echo "[entrypoint] Setting session.dmScope=per-channel-peer (required for multi-user session isolation)..."
+        node -e "
+            const JSON5 = require('json5');
+            const fs = require('fs');
+            const p = '$CONFIG_PATH';
+            const config = JSON5.parse(fs.readFileSync(p, 'utf-8'));
+            if (!config.session) config.session = {};
+            config.session.dmScope = 'per-channel-peer';
+            // Clean up: remove dmScope if it was mistakenly set under gateway
+            if (config.gateway?.dmScope) delete config.gateway.dmScope;
+            fs.writeFileSync(p, JSON5.stringify(config, null, 2));
+        "
+        echo "[entrypoint] dmScope set ✓"
     fi
 
     # Migrate: add welcome agent if missing from existing config

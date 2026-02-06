@@ -57,6 +57,9 @@ function spawnProcess(name, command, args, options = {}) {
     }
   });
 
+  // Track when process started for stable-run detection
+  const startedAt = Date.now();
+
   // Handle process exit
   proc.on('exit', (code, signal) => {
     const exitMsg = signal
@@ -64,14 +67,23 @@ function spawnProcess(name, command, args, options = {}) {
       : `exited with code ${code || 0}`;
     log(name, exitMsg);
 
+    // Don't restart on graceful shutdown
+    if (signal === 'SIGTERM' || signal === 'SIGINT') return;
+
+    // If process ran for >30s, it wasn't a crash loop — reset counter
+    const uptimeMs = Date.now() - startedAt;
+    if (uptimeMs > 30000) {
+      processes.restartCount[name] = 0;
+    }
+
     // Check if we should restart
-    if (processes.restartCount[name] < MAX_RESTARTS && signal !== 'SIGTERM' && signal !== 'SIGINT') {
+    if (processes.restartCount[name] < MAX_RESTARTS) {
       processes.restartCount[name]++;
       log('launcher', `Restarting ${name} in ${RESTART_DELAY}ms (attempt ${processes.restartCount[name]}/${MAX_RESTARTS})`);
       setTimeout(() => {
         processes[name] = spawnProcess(name, command, args, options);
       }, RESTART_DELAY);
-    } else if (processes.restartCount[name] >= MAX_RESTARTS) {
+    } else {
       log('launcher', `${name} exceeded max restarts (${MAX_RESTARTS}), giving up`);
       shutdownAll(1);
     }

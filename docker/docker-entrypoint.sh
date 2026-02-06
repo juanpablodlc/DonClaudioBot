@@ -33,6 +33,40 @@ else
         echo "[entrypoint] This may cause sticky session bug. Current config:"
         grep -A 2 '"session"' "$CONFIG_PATH" || true
     fi
+
+    # Migrate: add welcome agent if missing from existing config
+    if ! grep -q '"welcome"' "$CONFIG_PATH"; then
+        echo "[entrypoint] Adding welcome agent to existing config..."
+        node -e "
+            const JSON5 = require('json5');
+            const fs = require('fs');
+            const p = '$CONFIG_PATH';
+            const config = JSON5.parse(fs.readFileSync(p, 'utf-8'));
+            config.agents.list.unshift({ id: 'welcome', name: 'Welcome Agent', default: true, workspace: '~/.openclaw/workspace-welcome' });
+            config.agents.list.forEach((a, i) => { if (i > 0) delete a.default; });
+            fs.writeFileSync(p, JSON5.stringify(config, null, 2));
+        "
+        echo "[entrypoint] Welcome agent added to config"
+    else
+        echo "[entrypoint] Welcome agent already in config ✓"
+    fi
+fi
+
+# Ensure welcome agent workspace and directories exist
+STATE_DIR="${OPENCLAW_STATE_DIR:-/home/node/.openclaw}"
+WELCOME_WORKSPACE="$STATE_DIR/workspace-welcome"
+WELCOME_AGENT_DIR="$STATE_DIR/agents/welcome/agent"
+WELCOME_SESSIONS_DIR="$STATE_DIR/agents/welcome/sessions"
+
+echo "[entrypoint] Setting up welcome agent..."
+mkdir -p "$WELCOME_WORKSPACE" "$WELCOME_AGENT_DIR" "$WELCOME_SESSIONS_DIR"
+
+# Copy welcome agent template (AGENTS.md) to workspace
+if [ -f /app/config/agents/welcome/AGENTS.md ]; then
+    cp /app/config/agents/welcome/AGENTS.md "$WELCOME_WORKSPACE/AGENTS.md"
+    echo "[entrypoint] Welcome agent workspace ready: $WELCOME_WORKSPACE"
+else
+    echo "[entrypoint] WARNING: Welcome agent template not found at /app/config/agents/welcome/AGENTS.md"
 fi
 
 echo "[entrypoint] Starting OpenClaw Gateway + Onboarding Service..."

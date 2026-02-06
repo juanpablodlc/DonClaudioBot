@@ -6,6 +6,7 @@ import { dirname } from 'path';
 import lockfile from 'proper-lockfile';
 import JSON5 from 'json5';
 import { logConfigChange } from '../lib/audit-logger.js';
+import { validateBinding } from '../lib/validation.js';
 
 // OpenClaw config path
 export function getConfigPath(): string {
@@ -54,13 +55,19 @@ export async function addAgentToConfig(
   config.agents.list.push(agentConfig);
 
   // Add binding: phone -> agent
-  config.bindings.push({
+  const binding = {
     agentId: agentConfig.id,
     match: {
       channel: 'whatsapp',
       peer: { kind: 'dm', id: phoneNumber }
     }
-  });
+  };
+
+  // Validate binding before writing (prevents unknown keys from breaking OpenClaw's Zod validator)
+  validateBinding(binding);
+  console.log(`[config-writer] Adding binding: ${JSON.stringify(binding)}`);
+
+  config.bindings.push(binding);
 
   await writeConfigAtomic(config);
 }

@@ -5,7 +5,7 @@ import express from 'express';
 import { initDatabase } from './services/state-manager.js';
 import { router as webhookRouter } from './routes/webhook.js';
 import { router as stateRouter } from './routes/state.js';
-import { startBaileysSidecar } from './services/baileys-sidecar.js';
+import { startSessionWatcher } from './services/session-watcher.js';
 
 const app = express();
 
@@ -34,17 +34,8 @@ if (!process.env.HOOK_TOKEN) {
   console.warn('[WARN] HOOK_TOKEN not set - webhook endpoint is insecure!');
 }
 
-// Start Baileys sidecar if enabled
-if (process.env.BAILEYS_SIDECAR_ENABLED === 'true') {
-  console.log('[baileys-sidecar] Starting sidecar service...');
-  try {
-    startBaileysSidecar();
-  } catch (error) {
-    console.error('[baileys-sidecar] Failed to start:', error);
-  }
-} else {
-  console.log('[baileys-sidecar] Disabled (set BAILEYS_SIDECAR_ENABLED=true to enable)');
-}
+// Start session watcher for auto-onboarding (replaces Baileys sidecar)
+startSessionWatcher();
 
 // Start server
 app.listen(PORT, () => {

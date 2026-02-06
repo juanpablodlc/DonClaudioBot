@@ -1,5 +1,55 @@
 # Progress Log
 
+## Session: 2026-02-06 (Auto-Onboarding: Welcome Agent + Session Watcher + Gateway Restart Fix)
+
+**Timeline of events:**
+1. Implemented full auto-onboarding system: Welcome Agent + Session Watcher (replacing disabled Baileys sidecar)
+2. Created `config/agents/welcome/AGENTS.md` — multilingual welcome template with zero personal data
+3. Updated `config/openclaw.json.template` — added welcome agent as default
+4. Added Zod `.strict()` binding validation in `validation.ts` + `config-writer.ts` — prevents privacy breach root cause
+5. Created `onboarding/src/services/session-watcher.ts` — polls sessions.json every 5s, detects new phones, triggers createAgent()
+6. Updated `onboarding/src/index.ts` — replaced Baileys sidecar with session watcher
+7. Updated `docker/docker-entrypoint.sh` — welcome agent migration for existing volumes + workspace setup
+8. Fixed `docker/Dockerfile` — entrypoint path from `/app/config/docker-entrypoint.sh` to `/app/docker-entrypoint.sh`
+9. Created `scripts/reset-onboarding.sh` — 7-step reset script for fresh testing
+10. **First deploy + test:** Welcome agent responded correctly, session watcher created agent, BUT messages kept routing to welcome agent
+11. **Root cause investigation:** Read OpenClaw source code in `.openclaw-reference/`:
+    - `config-reload.ts:72`: `{ prefix: "bindings", kind: "none" }` — treats binding changes as no-op
+    - `monitor.ts:65`: `loadConfig()` called ONCE at startup, captured in closure
+    - `on-message.ts:66`: `resolveAgentRoute({ cfg: params.cfg })` uses stale snapshot
+    - **Confirmed:** Gateway restart required for new bindings to take effect
+12. **Fix implemented:** Session watcher sends SIGUSR2 to gateway after agent creation; launcher auto-restarts it
+13. **Launcher fix:** Restart counter resets after 30s stable uptime (prevents intentional restarts from hitting MAX_RESTARTS)
+
+**Files created:**
+- `config/agents/welcome/AGENTS.md` — Multilingual welcome template
+- `onboarding/src/services/session-watcher.ts` (~145 lines) — Session polling + phone detection + gateway restart
+- `scripts/reset-onboarding.sh` (~85 lines) — 7-step reset for fresh testing
+
+**Files modified:**
+- `config/openclaw.json.template` — Added welcome agent as default
+- `onboarding/src/lib/validation.ts` — Added BindingSchema with Zod .strict() on all levels
+- `onboarding/src/services/config-writer.ts` — Added validateBinding() call before writing
+- `onboarding/src/index.ts` — Replaced Baileys sidecar with session watcher
+- `docker/docker-entrypoint.sh` — Welcome agent migration + workspace setup
+- `docker/Dockerfile` — Fixed entrypoint path
+- `launcher.js` — Restart counter reset after 30s stable uptime
+- `findings.md` — Added Patterns 60-61
+- `progress.md` — This entry
+
+**Key discoveries:**
+- Pattern 60: OpenClaw bindings need gateway restart (config closure bug in monitor.ts)
+- Pattern 61: Launcher restart counter must reset for intentional restarts
+
+**Verification status:**
+- ✅ Welcome agent responds to unknown numbers
+- ✅ Session watcher detects new phones and creates agents
+- ✅ Binding validation prevents privacy breach root cause
+- ✅ Build passes (TypeScript compilation clean)
+- 🔲 Gateway restart fix not yet tested in production (pending deploy + reset)
+
+---
+
 ## Session: 2026-02-06 (Phase 11 REVISED - OAuth Fix with XDG_CONFIG_HOME Isolation)
 
 **Timeline of events:**

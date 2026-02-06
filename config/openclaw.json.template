@@ -9,7 +9,14 @@
         "mode": "off"
       }
     },
-    "list": []
+    "list": [
+      {
+        "id": "welcome",
+        "name": "Welcome Agent",
+        "default": true,
+        "workspace": "~/.openclaw/workspace-welcome"
+      }
+    ]
   },
   "bindings": [],
   "channels": {

@@ -641,6 +641,29 @@ To:
 - **Hetzner Server:** root@135.181.93.227 (SSH key: ~/.ssh/hetzner)
 - **OpenClaw Docs:** .openclaw-reference/ (search via `mcp__qmd__search` or `mcp__qmd__vsearch`)
 
+### Pattern 60: OpenClaw Bindings Need Gateway Restart (Config Closure Bug)
+**Symptom:** New binding written to `openclaw.json`, Gateway logs "config change applied (dynamic reads: bindings)", but messages keep routing to the old/default agent. Only a full Gateway restart fixes routing.
+**Root Cause:** Three-layer bug in OpenClaw's config reload system:
+1. `config-reload.ts:72` classifies `bindings` as `kind: "none"` (no-op) — assumes bindings are read dynamically per-message
+2. `monitor.ts:65` calls `loadConfig()` ONCE at startup and captures the config object in a closure
+3. `on-message.ts:66` uses `params.cfg` (the stale closure snapshot) for `resolveAgentRoute()`, never re-reading from disk
+**Evidence:** `loadConfig()` in `io.ts` has a 200ms TTL cache — designed for dynamic reads. But `monitorWebChannel` never calls it again after startup. The `createWebOnMessageHandler({ cfg, ... })` call at `monitor.ts:160` passes the startup config into the handler's closure permanently.
+**The "none" classification:** `config-reload.ts` BASE_RELOAD_RULES_TAIL has `{ prefix: "bindings", kind: "none" }`. "none" means "this section is read dynamically, no reload action needed." This is wrong for bindings — they're cached in the monitor closure.
+**Fix (workaround):** After creating a new agent binding, kill the Gateway process with SIGUSR2. Launcher.js auto-restarts it within 2 seconds. The fresh Gateway calls `monitorWebChannel` → `loadConfig()` → picks up new bindings.
+**Files involved:**
+- `.openclaw-reference/src/gateway/config-reload.ts:72` — The "none" rule
+- `.openclaw-reference/src/web/auto-reply/monitor.ts:65,160` — Config captured in closure
+- `.openclaw-reference/src/web/auto-reply/monitor/on-message.ts:66` — Uses stale `params.cfg`
+- `onboarding/src/services/session-watcher.ts` — Sends SIGUSR2 after agent creation
+- `launcher.js` — Auto-restarts gateway, resets counter after 30s stable run
+**Prevention:** When integrating with OpenClaw's config system, test that changes are actually picked up at runtime — don't trust the "config change applied" log message. For bindings specifically, always restart the Gateway.
+
+### Pattern 61: Launcher Restart Counter Must Reset for Intentional Restarts
+**Symptom:** After 3 new users onboard, launcher gives up restarting gateway ("exceeded max restarts")
+**Root Cause:** Each agent creation triggers a gateway SIGUSR2 kill + auto-restart. Launcher's `MAX_RESTARTS=3` counter increments on each restart. After 3 users, counter hits max and launcher shuts down everything.
+**Fix:** Reset restart counter to 0 if the process ran for >30 seconds before exiting. A process that ran 30s+ was stable (not crash-looping), so the next restart is intentional, not a crash.
+**Prevention:** When using process managers with restart limits, distinguish between crash restarts (rapid exit) and intentional restarts (stable run then signal).
+
 ## Visual/Browser Findings
 <!--
   WHAT: Information you learned from viewing images, PDFs, or browser results.

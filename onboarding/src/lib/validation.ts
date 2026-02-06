@@ -17,6 +17,22 @@ export const OnboardingWebhookSchema = z.object({
   timestamp: z.string().optional(),
 });
 
+// Binding schema - strict() on all levels rejects unknown keys (prevents the privacy breach root cause)
+export const BindingSchema = z.object({
+  agentId: z.string(),
+  match: z.object({
+    channel: z.string(),
+    peer: z.object({
+      kind: z.string(),
+      id: z.string(),
+    }).strict().optional(),
+  }).strict(),
+}).strict();
+
+export function validateBinding(binding: unknown): void {
+  BindingSchema.parse(binding);
+}
+
 // TypeScript types inferred from schemas
 export type E164Phone = z.infer<typeof E164PhoneSchema>;
 export type AgentId = z.infer<typeof AgentIdSchema>;

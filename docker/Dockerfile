@@ -37,8 +37,8 @@ COPY launcher.js ./
 COPY config ./config
 
 # Copy entrypoint script
-COPY docker/docker-entrypoint.sh /app/
-RUN chmod +x /app/docker/docker-entrypoint.sh
+COPY docker/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 # Create non-root user and state directory
 # Make idempotent for rebuilds
@@ -60,5 +60,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 
 # Run dual-process launcher (Gateway + Onboarding) via entrypoint
 # Entrypoint ensures openclaw.json exists with correct dmScope (prevents sticky session bug)
-ENTRYPOINT ["/app/docker/docker-entrypoint.sh"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD []

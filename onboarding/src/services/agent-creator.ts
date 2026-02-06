@@ -89,18 +89,19 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
           ],
           // setupCommand: Create per-client gog credential profile to avoid read-only bind mount issues
           // This pre-creates credentials-${agentId}.json so agents can run: gog auth add <email> --client ${agentId}
+          // NOTE: setupCommand runs via docker create, NOT docker exec, so HOME=/workspace must be set explicitly
           setupCommand: [
+            '# Create directories FIRST',
+            'mkdir -p /workspace/.gog /workspace/.config/gogcli/keyring',
+            '',
             '# Copy shared OAuth client credentials to writable location',
             'cp /workspace/.config/gogcli/credentials.json /workspace/.gog/credentials.json',
             '',
-            '# Create per-client credential profile from the copy',
-            `gog auth credentials set - --client ${agentId} < /workspace/.gog/credentials.json`,
+            '# Create per-client credential profile (must set HOME=/workspace explicitly)',
+            `HOME=/workspace gog auth credentials set - --client ${agentId} < /workspace/.gog/credentials.json`,
             '',
             '# Cleanup temporary copy',
             'rm /workspace/.gog/credentials.json',
-            '',
-            '# Ensure token directory exists',
-            'mkdir -p /workspace/.config/gogcli/keyring',
           ].join('\n'),
         },
       },

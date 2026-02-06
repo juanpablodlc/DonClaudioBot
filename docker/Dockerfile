@@ -36,6 +36,10 @@ RUN npm run build
 COPY launcher.js ./
 COPY config ./config
 
+# Copy entrypoint script
+COPY docker/docker-entrypoint.sh /app/
+RUN chmod +x /app/docker/docker-entrypoint.sh
+
 # Create non-root user and state directory
 # Make idempotent for rebuilds
 RUN groupadd -g 1000 appuser 2>/dev/null || true && \
@@ -54,5 +58,7 @@ EXPOSE 3000 18789
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
-# Run dual-process launcher (Gateway + Onboarding)
-CMD ["node", "launcher.js"]
+# Run dual-process launcher (Gateway + Onboarding) via entrypoint
+# Entrypoint ensures openclaw.json exists with correct dmScope (prevents sticky session bug)
+ENTRYPOINT ["/app/docker/docker-entrypoint.sh"]
+CMD []

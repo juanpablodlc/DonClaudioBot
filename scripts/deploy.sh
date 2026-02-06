@@ -26,6 +26,20 @@ rsync -av --exclude='node_modules' --exclude='.git' \
 echo "Copying .env to docker/ subdirectory..."
 ssh "$SERVER" "cp $PROJECT_DIR/.env $PROJECT_DIR/docker/.env 2>/dev/null || echo 'No .env found'"
 
+# CRITICAL: Ensure openclaw.json exists BEFORE starting container
+# If config doesn't exist, create from template to prevent OpenClaw using wrong defaults
+# OpenClaw defaults to dmScope='main' which causes all users to share one session
+echo "Checking OpenClaw config..."
+ssh "$SERVER" "
+if [ ! -f $PROJECT_DIR/config/openclaw.json ]; then
+    echo 'Creating openclaw.json from template (prevents sticky session bug)...'
+    cp $PROJECT_DIR/config/openclaw.json.template $PROJECT_DIR/config/openclaw.json
+    echo 'Created: config/openclaw.json with dmScope=per-channel-peer'
+else
+    echo 'Config exists: config/openclaw.json'
+fi
+"
+
 # Restart service on server with health checks
 echo ""
 echo "Restarting service on server..."

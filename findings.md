@@ -381,6 +381,20 @@ To:
 **Fix:** Use correct field name in curl: `{"phone": "+13128749154"}` not `{"phoneNumber": "+13128749154"}`.
 **Prevention:** Check validation schemas before making API calls. The field name in the schema (`phone`) takes precedence over internal variable names (`phoneNumber`) in agent-creator.ts.
 
+### Pattern 59: Missing openclaw.json Causes Sticky Session Bug (dmScope Defaults to 'main')
+**Symptom:** New user's WhatsApp messages are routed to existing user's agent. Sebastian (+14258777722) got responses from JP's agent, seeing JP's personal info (name, email, phone).
+**Root Cause:** When `openclaw.json` doesn't exist, OpenClaw uses **default configuration** which includes `dmScope: 'main'`. This causes ALL direct messages to share ONE session across the main/default agent. When JP's agent was created first (before config file existed), it became the "main" agent that caught ALL DMs.
+**Evidence:** Session `agent:user_823841ea13a6ce20:main` had `origin.from: +14258777722` (Sebastian) but `workspaceDir` pointed to JP's workspace. Config file's `birth` time was 02:25:26 (when Sebastian's agent was created), but JP's agent was created at 02:09:16 - **before config existed**.
+**Technical Details:** From session.md docs: `dmScope: 'main'` (default) means "all DMs share the main session for continuity. Multiple phone numbers and channels can map to the same agent main key." The correct setting for multi-user isolation is `dmScope: 'per-channel-peer'` which creates sessions per `agent:<agentId>:<channel>:dm:<peerId>`.
+**Fix Applied:**
+1. Deleted bad session: `rm /home/node/.openclaw/agents/user_823841ea13a6ce20/sessions/efd5cf58-aaa9-4bb9-b7eb-2ca8f8064e86.jsonl`
+2. Removed session entry from `sessions.json` for Sebastian's phone
+3. Implemented defensive config creation at TWO points:
+   - **deploy.sh**: Checks if `openclaw.json` exists on server, creates from template if missing
+   - **docker-entrypoint.sh**: Container startup creates config from template if missing in volume
+**Prevention:** `openclaw.json` MUST exist from first deployment with correct `dmScope: 'per-channel-peer'`. Template (config/openclaw.json.template) has this setting, but must be deployed BEFORE any agents are created. Both deploy script and container entrypoint now enforce this.
+**Security Impact:** This is a **privacy/security breach** - new users saw existing users' personal information. The fix ensures `dmScope: 'per-channel-peer'` is set from the start.
+
 ### Pattern 27: Template Directory Path in Container
 **Discovery:** When running in Docker container, `process.cwd()` returns `/app` (the WORKDIR from Dockerfile). Template path must be relative to this, not to the source file location.
 **Templates Location:** `/app/config/agents/dedicated-es/` (mounted from host `config/agents/dedicated-es/`)

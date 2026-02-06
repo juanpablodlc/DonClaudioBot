@@ -60,7 +60,6 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
 
     // Step 2: Build agent config and add to openclaw.json
     const gogKeyringPassword = randomBytes(32).toString('base64url');
-    const gogConfigDir = '/workspace/.gog';
 
     const agentConfig: AgentConfig = {
       id: agentId,
@@ -77,7 +76,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
           // docker.env vars are injected via docker exec -e at every tool call (not at container creation)
           env: {
             GOG_KEYRING_PASSWORD: gogKeyringPassword,
-            GOG_CONFIG_DIR: gogConfigDir,
+            XDG_CONFIG_HOME: '/workspace/.gog-config',
             GOG_KEYRING_BACKEND: 'file',
           },
           network: 'bridge',
@@ -87,21 +86,18 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
           binds: [
             '/root/google-credentials/credentials.json:/workspace/.config/gogcli/credentials.json:ro',
           ],
-          // setupCommand: Create per-client gog credential profile to avoid read-only bind mount issues
-          // This pre-creates credentials-${agentId}.json so agents can run: gog auth add <email> --client ${agentId}
-          // NOTE: setupCommand runs via docker create, NOT docker exec, so HOME=/workspace must be set explicitly
+          // setupCommand: Create isolated gog config with credentials as DEFAULT
+          // This prevents agents from seeing the read-only bind mount ("poison pill")
+          // XDG_CONFIG_HOME isolates gog to /workspace/.gog-config/gogcli/
+          // We copy credentials to credentials.json (default) so agents don't need --client flag
+          // NOTE: gogcli v0.8.0 doesn't support --client flag, so we use the default client
           setupCommand: [
-            '# Create directories FIRST',
-            'mkdir -p /workspace/.gog /workspace/.config/gogcli/keyring',
+            '# Create isolated gog config directory',
+            'mkdir -p /workspace/.gog-config/gogcli/keyring',
             '',
-            '# Copy shared OAuth client credentials to writable location',
-            'cp /workspace/.config/gogcli/credentials.json /workspace/.gog/credentials.json',
-            '',
-            '# Create per-client credential profile (must set HOME=/workspace explicitly)',
-            `HOME=/workspace gog auth credentials set - --client ${agentId} < /workspace/.gog/credentials.json`,
-            '',
-            '# Cleanup temporary copy',
-            'rm /workspace/.gog/credentials.json',
+            '# Store OAuth client credentials as DEFAULT client',
+            '# XDG_CONFIG_HOME must be set (setupCommand runs with different HOME)',
+            `XDG_CONFIG_HOME=/workspace/.gog-config gog auth credentials /workspace/.config/gogcli/credentials.json`,
           ].join('\n'),
         },
       },

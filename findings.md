@@ -278,6 +278,36 @@ To:
 **Fix Needed:** Implement conversational onboarding in the agent itself (post-creation). Agent's first interaction should request user details, then update its own memory files.
 **Prevention:** When designing agent creation, consider whether you need user metadata upfront. If yes, design a two-phase flow: (1) Create agent with minimal data, (2) Agent collects rest via conversation.
 
+---
+
+### Pattern 48: OpenClaw Sandbox Docker Env Vars Not Passed to Container (Critical Bug)
+**Symptom:** `docker inspect` of sandbox container shows ZERO custom env vars — only default Node.js image vars (PATH, NODE_VERSION, YARN_VERSION). Config has `agents.list[].sandbox.docker.env` with GOG_KEYRING_PASSWORD, GOG_CONFIG_DIR, GOG_KEYRING_BACKEND, but sandbox doesn't receive them.
+**Root Cause:** OpenClaw 2026.1.30 has a bug in `buildSandboxCreateArgs()` (src/agents/sandbox/docker.ts:106-168). The function processes many docker options (network, user, capDrop, tmpfs, binds, ulimits, etc.) but completely misses `params.cfg.env`. The env vars are defined in the SandboxDockerConfig type but never passed to the docker create command.
+**Evidence:**
+  - Agent config shows: `env: { GOG_KEYRING_PASSWORD: "...", GOG_CONFIG_DIR: "...", GOG_KEYRING_BACKEND: "file" }`
+  - `docker inspect sandbox` shows: only default PATH, NODE_VERSION, YARN_VERSION (no GOG_* vars)
+  - `gog auth status` inside sandbox shows: `keyring_backend: auto` (should be `file`) and `config_path: /root/.config/gogcli` (should use GOG_CONFIG_DIR)
+**Fix (Workaround):** Set env vars via `setupCommand` in /root/.profile so they persist for all docker exec commands:
+  ```bash
+  setupCommand: `cat >> /root/.profile << 'EOF'
+  export GOG_KEYRING_PASSWORD="..."
+  export GOG_CONFIG_DIR="/home/node/.openclaw/agents/${agentId}/agent/.gog"
+  export GOG_KEYRING_BACKEND="file"
+  EOF
+  mkdir -p "${GOG_CONFIG_DIR}"
+  `
+  ```
+**Consideration:** This is a temporary workaround. The proper fix is to patch OpenClaw's buildSandboxCreateArgs() to add:
+  ```typescript
+  if (params.cfg.env) {
+    for (const [key, value] of Object.entries(params.cfg.env)) {
+      args.push("-e", `${key}=${value}`);
+    }
+  }
+  ```
+**Prevention:** When using OpenClaw sandbox docker.env, verify env vars are actually present in running containers with `docker inspect <container> | grep -A 20 '"Env"'`. If missing, use setupCommand workaround or bake env vars into custom sandbox image.
+**Related:** Pattern 32 (gog hardcodes credentials path), Pattern 33 (sandbox binds use host paths)
+
 ### Pattern 27: Template Directory Path in Container
 **Discovery:** When running in Docker container, `process.cwd()` returns `/app` (the WORKDIR from Dockerfile). Template path must be relative to this, not to the source file location.
 **Templates Location:** `/app/config/agents/dedicated-es/` (mounted from host `config/agents/dedicated-es/`)
@@ -340,6 +370,77 @@ To:
 **Root Cause:** Directory created with `chmod 700` (root only) but container runs as user 1000. Docker bind mounts preserve host permissions.
 **Fix:** Use `chmod 755` for directory and `chmod 644` for file (world-readable, since credential file is read-only mount anyway)
 **Prevention:** When creating host directories for Docker mounts, consider the container's user. Non-root containers need at least read+execute on directories and read on files.
+
+### Pattern 37: Baileys Sidecar + Gateway Dual WhatsApp Connection Conflict
+**Symptom:** Gateway logs show "Stream Errored (conflict)" repeatedly. Baileys sidecar connects, gets kicked off, reconnects, kicks Gateway off — infinite loop. Messages silently dropped because whichever process loses the race doesn't see incoming messages.
+**Root Cause:** WhatsApp only allows ONE active WebSocket connection per phone number. Both Gateway's WhatsApp provider and Baileys sidecar create separate Baileys connections using the same credentials at `/home/node/.openclaw/credentials/whatsapp/default/`.
+**Evidence:** Gateway logs: `[whatsapp] Web connection closed (status 440). Retry N/12 in 30s… (status=440 Unknown Stream Errored (conflict))`. Baileys logs: `connection errored: Stream Errored (conflict)`.
+**Fix:** Disabled Baileys sidecar (`BAILEYS_SIDECAR_ENABLED=false`). Gateway then connects cleanly with no conflicts.
+**Impact:** Baileys sidecar was the mechanism for detecting unknown users and triggering onboarding webhook. With it disabled, automatic onboarding needs a replacement (OpenClaw hook or default agent approach).
+**Prevention:** Never run two Baileys connections with the same WhatsApp credentials in the same container. If you need to detect incoming messages, use the platform's hook/event system, not a parallel listener.
+
+### Pattern 38: OpenClaw Status Can Report "OK" With Stale/Dead Connection
+**Symptom:** `openclaw status` shows `WhatsApp: ON, OK, linked` but no messages are being received. Gateway logs show no activity for hours.
+**Root Cause:** `openclaw status` reports cached/configured state, not real-time WebSocket health. The WhatsApp provider may have been kicked off by Baileys conflict and never reconnected, but status still shows "OK" because the channel is configured and credentials exist.
+**Evidence:** Status showed "OK, linked, auth 11h ago" while the last Gateway WhatsApp log was from 6 hours prior with no incoming messages processed.
+**Prevention:** Don't trust `openclaw status` for real-time connection health. Verify by checking Gateway logs for recent `[whatsapp] Listening for personal WhatsApp inbound messages` entries. If the last one is hours old, the connection is likely dead.
+
+### Pattern 39: Live Config Requires Manual Cleanup (Template ≠ Volume, Again)
+**Symptom:** Removed onboarding agent from template in Phase 10, but live config on server still has the onboarding agent with `default: true` and its catch-all binding.
+**Root Cause:** Pattern #2 revisited — template changes don't apply to existing volumes. The template was updated but the live `openclaw.json` in the `don-claudio-state` volume was never cleaned up.
+**Fix:** Used Node.js script with `json5` package inside the container to clear `agents.list` and `bindings` arrays. Also cleaned up SQLite test rows, workspace directories, and agent state dirs.
+**Prevention:** Every template change needs a corresponding "migration" step for live systems. Document live config changes alongside template changes. Consider a deploy-time reconciliation script.
+
+### Pattern 40: OpenClaw Config is JSON5 — Cannot Use JSON.parse()
+**Symptom:** `SyntaxError: Expected property name or '}' in JSON at position 4` when reading `openclaw.json` with `JSON.parse()`.
+**Root Cause:** OpenClaw config uses JSON5 format (unquoted keys, trailing commas). Standard `JSON.parse()` rejects this.
+**Fix:** Use `require("json5").parse()` — the `json5` package is available in the OpenClaw container as a dependency.
+**Alternative:** Use `npx openclaw config get <key>` CLI commands for reading, or `npx openclaw config set <key> <value>` for writing.
+**Prevention:** Never use `JSON.parse()` on OpenClaw config files. Always use json5 or the CLI.
+
+### Pattern 41: Docker Socket Requires group_add for Non-Root Containers
+**Symptom:** `permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock`
+**Root Cause:** Container runs as `user: 1000:1000` (node). Docker socket is `root:docker` (GID 988). Container user doesn't have the docker group.
+**Fix:** Added `group_add: ["988"]` to docker-compose.yml — adds docker group as supplementary group to container user.
+**Verification:** `docker exec don-claudio-bot id` shows `groups=1000(node),988`
+**Prevention:** When mounting Docker socket into non-root containers, always check the docker group GID on the host (`getent group docker`) and add it via `group_add` in compose.
+
+### Pattern 42: Docker API Version Mismatch (Client Too Old for Daemon)
+**Symptom:** `client version 1.41 is too old. Minimum supported API version is 1.44, please upgrade your client to a newer version`
+**Root Cause:** OpenClaw container ships with Docker client libraries that speak API v1.41. Host Docker daemon (v29.1.4) requires minimum API v1.44. The container's client sends requests to `/v1.41/images/...` which the daemon rejects.
+**Fix:** Set `DOCKER_API_VERSION=1.44` environment variable in docker-compose.yml. This overrides the client's default API version.
+**Prevention:** When running Docker-in-Docker (socket mount), check host daemon's minimum API version (`docker version --format '{{.Server.MinAPIVersion}}'`) and set `DOCKER_API_VERSION` accordingly.
+
+### Pattern 43: OpenClaw Hooks — No `message:received` Event Yet
+**Symptom:** Need to detect incoming messages from unknown users to trigger onboarding, but no hook event exists for this.
+**Root Cause:** OpenClaw hooks support `command:new`, `command:reset`, `command:stop`, `agent:bootstrap`, `gateway:startup`. The `message:received` and `session:start` events are listed as **"Future Events"** in the docs — planned but not yet implemented (as of v2026.1.30).
+**Implication:** Cannot use hooks to detect unknown users messaging for the first time. The Baileys sidecar was the workaround, but it's broken (Pattern #37). Need alternative: default agent with `agent:bootstrap` hook, or manual webhook trigger.
+**Prevention:** Always check if an event type is under "Future Events" in the docs before building around it.
+
+### Pattern 44: Env Vars Not in .env Are Silently Defaulted
+**Symptom:** `BAILEYS_SIDECAR_ENABLED` was never in the `.env` file but showed as `true` in the container.
+**Root Cause:** `docker-compose.yml` has `BAILEYS_SIDECAR_ENABLED=${BAILEYS_SIDECAR_ENABLED:-true}` — the `:-true` default applies when the variable is unset. Since it wasn't in `.env`, Docker Compose used the default.
+**Fix:** Added `BAILEYS_SIDECAR_ENABLED=false` to `docker/.env` to explicitly disable.
+**Prevention:** All environment variables with significant behavior changes should be explicitly listed in `.env`, not relied upon via defaults. Add comments in `.env.example` documenting ALL supported env vars.
+
+### Pattern 45: Container Restart Clears WhatsApp Session State
+**Symptom:** After `docker compose up -d --force-recreate`, sessions show 0 and previous message history is gone.
+**Root Cause:** WhatsApp session state (active sessions, message queue) is in-memory within the Gateway process. Container recreation kills the process and clears all in-memory state. Only credentials (creds.json, pre-keys) persist in the volume.
+**Impact:** Users need to send a new message after container restart — previous sessions are gone. This is acceptable but should be documented.
+**Prevention:** Plan container restarts during low-usage periods. Users will need to re-initiate conversation. Don't restart containers during active conversations.
+
+### Pattern 47: Sandbox ENTRYPOINT ["node"] Breaks Container Keepalive
+**Symptom:** Sandbox container exits immediately with code 1: `Cannot find module '/workspace/sleep'`
+**Root Cause:** `Dockerfile.sandbox` had `ENTRYPOINT ["node"]`. OpenClaw starts sandbox containers with `Cmd: [sleep infinity]` to keep them alive, then uses `docker exec ... sh -lc <command>` for tool execution. With `ENTRYPOINT ["node"]`, the container runs `node sleep infinity` — Node.js tries to load `sleep` as a JS module and crashes.
+**Fix:** Removed `ENTRYPOINT ["node"]` from Dockerfile.sandbox. The base image (`node:22-bookworm-slim`) has `docker-entrypoint.sh` which execs the CMD directly. Now `sleep infinity` runs as intended.
+**Verification:** `docker run --rm -d openclaw-sandbox:bookworm-slim sleep infinity` → stays alive. `docker exec <id> sh -lc "gog --version"` → works.
+**Prevention:** Never set `ENTRYPOINT ["node"]` in sandbox images. OpenClaw needs the container's CMD to be a shell command (`sleep infinity`), not a Node.js script. Tools run via `docker exec`, which bypasses the entrypoint entirely.
+
+### Pattern 46: deploy.sh Does NOT Fix Live Config Issues
+**Symptom:** User expected `deploy.sh` to fix the onboarding agent in the live config.
+**Root Cause:** `deploy.sh` rebuilds the container image (code) and recreates the container, but the `don-claudio-state` volume persists with its existing `openclaw.json`. Template changes only apply when the volume is created fresh.
+**Implication:** Code deployments and config migrations are SEPARATE operations. `deploy.sh` handles code; config changes require manual intervention via `openclaw config set` or direct JSON5 editing.
+**Prevention:** Document that template changes need a corresponding live config migration step. Consider adding a `migrate-config.sh` script.
 
 ---
 

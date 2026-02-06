@@ -24,11 +24,15 @@ services:
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-change-me}
       - HOOK_TOKEN=${HOOK_TOKEN:-change-me}
       - ZAI_API_KEY=${ZAI_API_KEY:-change-me}
-      - BAILEYS_SIDECAR_ENABLED=${BAILEYS_SIDECAR_ENABLED:-true}
+      - BAILEYS_SIDECAR_ENABLED=${BAILEYS_SIDECAR_ENABLED:-false}
+      - DOCKER_API_VERSION=${DOCKER_API_VERSION:-1.44}
     networks:
       - don-claudio-network
     # Security hardening - run as non-root user
     user: "${UID:-1000}:${GID:-1000}"
+    # Add docker group for non-root container to access Docker socket (Pattern 41)
+    group_add:
+      - "${DOCKER_GID:-988}"
     # Prevent container filesystem modification
     read_only: true
     # Writable temporary storage

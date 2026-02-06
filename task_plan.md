@@ -17,7 +17,7 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-**🚀 ALL PHASES COMPLETE** → Phase 9 COMPLETE (Google OAuth credential setup + per-user auth flow). Shared OAuth credentials deployed to Hetzner, sandbox bind mounts configured, GOG_CONFIG_DIR bug fixed, agent templates updated with OAuth instructions (EN+ES). All phases 0-10 complete.
+**Phase 11: COMPLETE** — Fix sandbox OAuth (env vars not passed, bind mount path wrong)
 
 ## Phases
 <!--
@@ -643,6 +643,100 @@ To add a new language (e.g., Portuguese for +55 Brazil):
 3. No code deployment needed, just config file update
 
 **Status:** **COMPLETE** — All tasks implemented, TypeScript compiles, ready for deployment
+
+### Phase 11: Fix Sandbox OAuth — Env Vars & Credential Paths (IN PROGRESS)
+<!--
+  WHAT: Fix two root causes preventing Google OAuth from working inside sandbox containers.
+  WHY: First real user (JP, +13128749154) tried to connect Gmail. Bot couldn't find credentials
+       and fell back to asking user to manually run terminal commands.
+-->
+
+#### Situation
+- User onboarded successfully (Mr Botly greeting, name/email collected)
+- User asked bot to connect Gmail via `gog auth add`
+- Bot's sandbox container could NOT run OAuth — fell back to telling user to run terminal commands manually
+
+#### Root Cause Analysis (2 issues found)
+
+**Issue 1: Sandbox env vars NOT being passed to Docker container**
+- `openclaw.json` has `agents.list[].sandbox.docker.env` with `GOG_KEYRING_PASSWORD`, `GOG_CONFIG_DIR`, `GOG_KEYRING_BACKEND`
+- `docker inspect` of sandbox container shows ZERO custom env vars — only default Node.js image vars (PATH, NODE_VERSION, YARN_VERSION)
+- `docker exec ... env` confirms: `GOG_CONFIG_DIR=` (empty), `GOG_KEYRING_BACKEND` missing
+- `gog auth status` inside sandbox shows: `keyring_backend: auto` (should be `file`), `config_path: /root/.config/gogcli/config.json`
+- **OpenClaw is ignoring the per-agent `env` config when creating sandbox containers**
+
+**Issue 2: Bind mount path doesn't match where gog looks**
+- Config binds: `/root/google-credentials/credentials.json:/home/node/.config/gogcli/credentials.json:ro`
+- Sandbox runs as **root** (HOME=/root), so gog looks at `/root/.config/gogcli/credentials.json`
+- credentials.json IS present at `/home/node/.config/gogcli/credentials.json` (bind mount works)
+- But gog never looks there because HOME=/root
+- Error log: `OAuth client credentials missing (expected at /workspace/.config/gogcli/credentials.json)`
+- Secondary error: `Path escapes sandbox root` when agent tries to read the credentials file
+
+**Additional context:**
+- Sandbox container runs as root (HOME=/root, PWD=/workspace)
+- OpenClaw workspace mounted at `/workspace` (workspaceAccess: "rw")
+- The old sandbox container (8c5afe490639) from the ENTRYPOINT bug is gone; current sandbox (278a75fa1a69) is new but still has no env vars
+
+#### Implementation Tasks
+
+**Task 1: Fix bind mount target path**
+- [ ] Change bind in `agent-creator.ts` from:
+  `/root/google-credentials/credentials.json:/home/node/.config/gogcli/credentials.json:ro`
+  to:
+  `/root/google-credentials/credentials.json:/root/.config/gogcli/credentials.json:ro`
+- [ ] Update live config on server with new bind path
+- [ ] Recreate sandbox to pick up new bind
+
+**Task 2: Investigate and fix env var injection**
+- [ ] Check OpenClaw version for known bugs with per-agent `sandbox.docker.env`
+- [ ] Try workaround: move env vars to `agents.defaults.sandbox.docker.env` (but these are per-user values...)
+- [ ] Alternative workaround: bake env vars into `setupCommand` or use a wrapper script
+- [ ] Alternative workaround: set env vars via the sandbox image itself
+- [ ] If OpenClaw bug: file issue or find workaround
+
+**Task 3: Recreate sandbox and verify**
+- [ ] `openclaw sandbox recreate --agent user_405bf6b6cf0f1a4f`
+- [ ] Verify `docker inspect` shows env vars
+- [ ] Verify `docker exec ... gog auth status` shows correct config_path and keyring_backend
+- [ ] Verify credentials.json is found by gog
+- [ ] Test `gog auth add juanpablodlc@gmail.com --manual` works inside sandbox
+
+**Task 4: Backport server-only changes to repo** (from earlier session)
+- [ ] `docker-compose.yml`: add `group_add: ["988"]`, `DOCKER_API_VERSION=1.44`
+- [ ] `Dockerfile.sandbox`: ENTRYPOINT removal already in local repo
+- [ ] Document `BAILEYS_SIDECAR_ENABLED=false` in .env.example
+
+#### Verification
+- [ ] `gog auth status` inside sandbox shows correct paths
+- [ ] `gog auth add <email> --manual` outputs OAuth URL
+- [ ] User can complete OAuth flow via WhatsApp conversation
+- [ ] Tokens stored in isolated per-agent directory
+
+**Status:** **COMPLETE** (2026-02-05) — Workaround implemented for OpenClaw bug, server changes backported to repo
+
+**Implementation Summary:**
+1. ✅ **Bind mount path:** Already correct in code and live config (`/root/.config/gogcli/credentials.json:ro`)
+2. ✅ **Env var injection bug:** Discovered OpenClaw 2026.1.30 bug — `buildSandboxCreateArgs()` doesn't pass env vars to docker create
+3. ✅ **Workaround implemented:** Use `setupCommand` to write env vars to `/root/.profile` so they persist for all docker exec commands
+4. ✅ **Server changes backported:** `docker-compose.yml` (group_add, DOCKER_API_VERSION, BAILEYS_SIDECAR_ENABLED), `.env.example` updated
+5. ✅ **Test script created:** `scripts/test-sandbox-oauth.sh` for verification
+6. ✅ **Pattern documented:** Pattern 48 in findings.md (OpenClaw sandbox env var bug)
+
+**Files changed:**
+- `onboarding/src/services/agent-creator.ts` (+30 lines) — Added setupCommand workaround
+- `docker/docker-compose.yml` (+4 lines) — group_add, DOCKER_API_VERSION, BAILEYS_SIDECAR_ENABLED
+- `.env.example` (+10 lines) — DOCKER_GID, DOCKER_API_VERSION, BAILEYS documentation
+- `scripts/test-sandbox-oauth.sh` (45 lines) — New verification script
+- `findings.md` (+40 lines) — Pattern 48
+- `progress.md` — Session entry
+
+**Next steps:**
+- Deploy to Hetzner and test sandbox OAuth with real user
+- Run `./scripts/test-sandbox-oauth.sh` to verify env vars in sandbox
+- Test `gog auth add <email> --manual` works inside sandbox
+
+---
 
 ## Key Questions
 <!--

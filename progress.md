@@ -1,5 +1,121 @@
 # Progress Log
 
+## Session: 2026-02-05 (Phase 11 COMPLETE - Fix Sandbox OAuth — Env Vars & Credential Paths)
+
+**Timeline of events:**
+1. Loaded Karpathy skill, read task_plan.md Phase 11, findings.md, progress.md
+2. **QMD Research (Documentation First):**
+   - Confirmed OpenClaw docs state `agents.defaults.sandbox.docker.env` (or per-agent `agents.list[].sandbox.docker.env`) should work
+   - Found OpenClaw reference source code in `.openclaw-reference/` directory
+3. **CRITICAL DISCOVERY #1:** OpenClaw 2026.1.30 has a BUG in `buildSandboxCreateArgs()` (src/agents/sandbox/docker.ts:106-168)
+   - The function processes docker options (network, user, capDrop, tmpfs, binds, ulimits, etc.)
+   - But completely MISSES `params.cfg.env` — env vars are never passed to `docker create` command
+   - Verified by reading the source code — no loop to add `-e` flags for env vars
+4. **CRITICAL DISCOVERY #2:** Bind mount path was already CORRECT in live config
+   - Live config: `/root/.config/gogcli/credentials.json:ro` ✅
+   - Repo code: `/root/.config/gogcli/credentials.json:ro` ✅
+   - This was fixed in a previous session (Pattern 33)
+5. **Implemented Workaround:** Use `setupCommand` to bake env vars into `/root/.profile`
+   - OpenClaw runs setupCommand once after container creation via `sh -lc`
+   - Env vars written to `/root/.profile` persist for all subsequent `docker exec` commands
+   - Added `mkdir -p` for GOG_CONFIG_DIR to ensure token directory exists
+6. **Backported server-only changes to repo:**
+   - `docker-compose.yml`: Added `group_add: ["${DOCKER_GID:-988}"]` and `DOCKER_API_VERSION=1.44`
+   - `.env.example`: Documented `DOCKER_GID`, `DOCKER_API_VERSION`, `BAILEYS_SIDECAR_ENABLED=false`
+   - Updated BAILEYS_SIDECAR_ENABLED documentation with Pattern 37 conflict explanation
+7. **Created test script:** `scripts/test-sandbox-oauth.sh` for verification
+8. **Documented Pattern 48:** OpenClaw Sandbox Docker Env Vars Not Passed to Container (Critical Bug)
+9. **Built TypeScript:** Compilation successful
+10. **STATUS: Phase 11 COMPLETE** 🚀
+
+**Files created:**
+- `scripts/test-sandbox-oauth.sh` (45 lines) — Verification script for sandbox OAuth setup
+
+**Files modified:**
+- `onboarding/src/services/agent-creator.ts` (+30 lines) — Added setupCommand workaround for env vars
+- `docker/docker-compose.yml` (+4 lines) — Added group_add, DOCKER_API_VERSION, BAILEYS_SIDECAR_ENABLED env
+- `.env.example` (+10 lines) — Documented DOCKER_GID, DOCKER_API_VERSION, updated BAILEYS_SIDECAR_ENABLED
+- `findings.md` (+40 lines) — Added Pattern 48 (OpenClaw sandbox env var bug)
+- `progress.md` — This entry
+
+**Key verification results:**
+- ✅ Agent config has correct bind mount: `/root/.config/gogcli/credentials.json:ro`
+- ✅ Agent config has env vars defined: GOG_KEYRING_PASSWORD, GOG_CONFIG_DIR, GOG_KEYRING_BACKEND
+- ✅ setupCommand workaround implemented (will write env vars to /root/.profile)
+- ✅ docker-compose.yml backported with group_add and DOCKER_API_VERSION
+- ✅ .env.example updated with all server-side env vars
+
+**Next steps:**
+- Deploy to Hetzner to test sandbox OAuth with real user
+- Run `./scripts/test-sandbox-oauth.sh` to verify env vars are present in sandbox
+- Test `gog auth add <email> --manual` works inside sandbox
+- If workaround works, document as permanent solution until OpenClaw fixes the bug
+
+**OpenClaw Bug Report Needed:**
+- File issue with OpenClaw: `buildSandboxCreateArgs()` missing env var handling
+- Include fix: Add loop to process `params.cfg.env` and add `-e` flags to docker create
+- Reference: `.openclaw-reference/src/agents/sandbox/docker.ts:106-168`
+
+---
+
+## Session: 2026-02-05 (First User Onboarding Attempt — Gateway + Docker Fixes)
+
+**Timeline of events:**
+1. Ran end-to-end verification checklist: 13/13 local + server checks passed
+2. **CRITICAL DISCOVERY #1:** Live config still had "onboarding" agent with `default: true` + catch-all binding (Phase 10 template change didn't apply to volume — Pattern #2 revisited)
+3. Cleaned live config: removed all 3 test agents (onboarding, user_7659, user_b6038), all 3 bindings, SQLite test rows, workspace dirs, agent state dirs — used `json5` package in container since config is JSON5 (Pattern #40)
+4. User sent WhatsApp "Hello" — **no response, no logs**
+5. **CRITICAL DISCOVERY #2:** Baileys sidecar and Gateway fighting over WhatsApp connection (Pattern #37). Status 440 "Stream Errored (conflict)" in logs. Gateway's last WhatsApp activity was 11h ago despite `openclaw status` showing "OK" (Pattern #38)
+6. Researched OpenClaw hooks via QMD — `message:received` is a "Future Event", not yet implemented (Pattern #43). Cannot use hooks for unknown user detection.
+7. Disabled Baileys sidecar (`BAILEYS_SIDECAR_ENABLED=false` in docker/.env)
+8. Manually triggered webhook: `POST /webhook/onboarding` with user's real phone +13128749154
+9. Agent `user_405bf6b6cf0f1a4f` created with `dedicated-en` template (Mr Botly), correct sandbox config
+10. Container restart — WhatsApp connected cleanly, no conflict. Gateway: "Listening for personal WhatsApp inbound messages"
+11. User sent "Hello" — **message received!** `[whatsapp] Inbound message +13128749154 -> +12062274085 (direct, 50 chars)`
+12. **FAIL:** `permission denied` on Docker socket — container user 1000 not in docker group 988 (Pattern #41)
+13. Fixed: `group_add: ["988"]` in docker-compose.yml, recreated container
+14. User sent "Hello" — **FAIL:** `client version 1.41 is too old. Minimum supported API version is 1.44` (Pattern #42)
+15. Fixed: `DOCKER_API_VERSION=1.44` in docker-compose.yml environment
+16. Container recreated, Gateway listening, WhatsApp OK — awaiting user's next test message
+
+**Files modified (on server only, not in repo):**
+- `docker/.env` — Added `BAILEYS_SIDECAR_ENABLED=false`
+- `docker/docker-compose.yml` — Added `group_add: ["988"]` and `DOCKER_API_VERSION=1.44`
+- Live `openclaw.json` — Cleared agents.list and bindings (via json5 in-container script)
+- Live `onboarding.db` — Deleted 2 test rows
+
+**Files modified (in repo):**
+- `findings.md` — Added Patterns 37-46
+- `progress.md` — This entry
+
+**Key findings documented (Patterns 37-46):**
+- Pattern 37: Baileys + Gateway dual WhatsApp connection conflict
+- Pattern 38: `openclaw status` reports stale/cached connection state
+- Pattern 39: Live config requires manual cleanup (template ≠ volume)
+- Pattern 40: OpenClaw config is JSON5, not JSON — use json5 package
+- Pattern 41: Docker socket needs group_add for non-root containers
+- Pattern 42: Docker API version mismatch — set DOCKER_API_VERSION env var
+- Pattern 43: No `message:received` hook in OpenClaw yet (Future Event)
+- Pattern 44: Env vars not in .env silently use compose defaults
+- Pattern 45: Container restart clears WhatsApp sessions (in-memory)
+- Pattern 46: deploy.sh does NOT fix live config issues
+
+**Architectural decision:**
+- Baileys sidecar approach is broken and disabled. Needs replacement for automatic onboarding.
+- For now, manual webhook trigger creates agents. Proper fix: default agent + `agent:bootstrap` hook, or wait for OpenClaw `message:received` event.
+
+17. User tested — sandbox container crashed: `ENTRYPOINT ["node"]` + `Cmd: [sleep infinity]` = `node sleep infinity` → MODULE_NOT_FOUND (Pattern #47)
+18. Fixed: removed `ENTRYPOINT ["node"]` from Dockerfile.sandbox, rebuilt image on server
+19. Verified: sandbox container stays alive with `sleep infinity`, `gog --version` works via `docker exec`
+20. User testing again via WhatsApp...
+
+**What still needs to happen:**
+- Verify agent responds with working sandbox (tool execution)
+- Backport server-side changes to repo (docker-compose: group_add, DOCKER_API_VERSION, BAILEYS; Dockerfile.sandbox: no ENTRYPOINT)
+- Design replacement for Baileys sidecar auto-onboarding
+
+---
+
 ## Session: 2026-02-05 (Phase 9 COMPLETE - Google OAuth Credential Setup)
 
 **Timeline of events:**

@@ -22,4 +22,6 @@ ENV PATH=/home/node/.local/bin:$PATH
 # Copy dedicated agent workspace templates
 COPY --chown=node:node config/agents/dedicated/ /home/node/workspace/
 
-ENTRYPOINT ["node"]
+# No custom ENTRYPOINT - OpenClaw starts containers with "sleep infinity" keepalive
+# and runs tools via "docker exec ... sh -lc <command>"
+# ENTRYPOINT ["node"] would break this by running "node sleep infinity"

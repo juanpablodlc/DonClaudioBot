@@ -1,5 +1,55 @@
 # Progress Log
 
+## Session: 2026-02-06 (Phase 11 REVISED - OAuth Fix with XDG_CONFIG_HOME Isolation)
+
+**Timeline of events:**
+1. User reported OAuth issues: "3 days in circles" debugging gog CLI credentials path mismatch
+2. **ROOT CAUSE IDENTIFIED:** `GOG_CONFIG_DIR` doesn't exist in gogcli - gog uses `os.UserConfigDir()` which respects `XDG_CONFIG_HOME`
+3. **DeepWiki MCP Research:** Confirmed gogcli v0.8.0 ignores `GOG_CONFIG_DIR`, uses `XDG_CONFIG_HOME/gogcli/` or `$HOME/.config/gogcli/`
+4. **The "Poison Pill" Discovery:** Read-only bind mount at `/workspace/.config/gogcli/credentials.json` breaks OAuth when agents forget `--client` flag
+5. **User's Key Insight:** "Infrastructure-level safety > agent memory" - don't rely on LLMs to remember flags
+6. **Fix Implemented:** Set `XDG_CONFIG_HOME=/workspace/.gog-config` to isolate gog from poison pill, store credentials as default
+7. **Simplified approach:** gogcli v0.8.0 lacks `--client` flag - removed per-client complexity, use default credentials.json
+8. **Git commit/push:** bb1b51a - "fix: OAuth path mismatch with XDG_CONFIG_HOME isolation"
+9. **Deployed to Hetzner:** Clean onboarding for +13128749154, created fresh agent `user_823841ea13a6ce20`
+10. **OAuth SUCCESS:** User authorized Gmail, agent read first email - fix verified working
+
+**Files created:**
+- DonClaudioBugReport-OAuth-Debugging-Session.md (3-day debugging post-mortem)
+- WhatsApp-End-to-End-Testing-Issues.md (user chat transcript analysis)
+- scripts/test-sandbox-oauth.sh (verification script)
+
+**Files modified:**
+- onboarding/src/services/agent-creator.ts - Removed `GOG_CONFIG_DIR`, added `XDG_CONFIG_HOME`, simplified setupCommand
+- docker/docker-compose.yml - Reverted test bind mount to production path
+- config/sandbox/Dockerfile.sandbox - Removed ENTRYPOINT node
+- findings.md - Added Patterns 49-58 (OAuth debugging lessons)
+- progress.md - This session entry
+
+**Key verification:**
+- ✅ credentials.json created at `/workspace/.gog-config/gogcli/` (isolated from poison pill)
+- ✅ Agent can run `gog auth add <email>` without `--client` flag
+- ✅ User successfully authorized Gmail via WhatsApp chat
+- ✅ Agent read first email successfully
+
+**Lessons learned (Patterns 49-58):**
+- Pattern 49: `GOG_CONFIG_DIR` doesn't exist in gogcli
+- Pattern 50: "Poison Pill" - read-only bind mounts break OAuth
+- Pattern 51: Infrastructure safety > agent memory
+- Pattern 52: DeepWiki MCP revealed truth vs assumptions
+- Pattern 53: gogcli v0.8.0 lacks --client flag
+- Pattern 54: setupCommand vs tool exec HOME mismatch
+- Pattern 55: SQLite database location confusion
+- Pattern 56: Cheating by manually creating agent
+- Pattern 57: Deployment uses rsync, not git pull
+- Pattern 58: Webhook schema uses "phone" field
+
+**Next steps:**
+- Monitor production for OAuth issues with other users
+- Consider upgrading to gogcli v0.9.0+ for --client flag support (if needed for multi-tenant isolation)
+
+---
+
 ## Session: 2026-02-05 (Phase 11 COMPLETE - Fix Sandbox OAuth — Env Vars & Credential Paths)
 
 **Timeline of events:**

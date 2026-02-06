@@ -7,6 +7,7 @@ RUN apt-get update && \
     ca-certificates \
     docker.io \
     git \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Install gog CLI for sandbox (Google OAuth)

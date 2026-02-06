@@ -4,7 +4,6 @@
 
 import { readFileSync } from 'fs';
 import { existsSync } from 'fs';
-import { execSync } from 'child_process';
 import { getState, createState } from './state-manager.js';
 import { createAgent } from './agent-creator.js';
 
@@ -86,15 +85,15 @@ async function processNewPhone(phone: string): Promise<void> {
 
 /**
  * Restart the Gateway process so it picks up new bindings.
- * Sends SIGUSR2 to the openclaw gateway process; launcher.js auto-restarts it.
+ * Sends SIGUSR1 to the launcher (our parent process), which owns the gateway
+ * child process handle and can do a clean SIGTERM → respawn cycle.
  */
 function restartGateway(): void {
   try {
-    execSync('pkill -USR2 -f "openclaw gateway"', { timeout: 5000 });
-    console.log('[session-watcher] Gateway restart triggered (new binding requires fresh config)');
-  } catch {
-    // pkill returns exit code 1 if no process matched — not an error for us
-    console.log('[session-watcher] Gateway restart signal sent');
+    process.kill(process.ppid, 'SIGUSR1');
+    console.log('[session-watcher] Sent SIGUSR1 to launcher (requesting gateway restart)');
+  } catch (error) {
+    console.error('[session-watcher] Failed to signal launcher:', error);
   }
 }
 

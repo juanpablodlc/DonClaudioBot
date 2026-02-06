@@ -15,6 +15,9 @@ import { spawn } from 'child_process';
 const MAX_RESTARTS = 3;
 const RESTART_DELAY = 2000; // 2 seconds
 
+// Flag for intentional gateway restart via SIGUSR1 (from session watcher)
+let intentionalGatewayRestart = false;
+
 // Process state
 const processes = {
   gateway: null,
@@ -67,8 +70,16 @@ function spawnProcess(name, command, args, options = {}) {
       : `exited with code ${code || 0}`;
     log(name, exitMsg);
 
-    // Don't restart on graceful shutdown
-    if (signal === 'SIGTERM' || signal === 'SIGINT') return;
+    // Don't restart on graceful shutdown — unless it was an intentional gateway restart
+    if (signal === 'SIGTERM' || signal === 'SIGINT') {
+      if (name === 'gateway' && intentionalGatewayRestart) {
+        intentionalGatewayRestart = false;
+        processes.restartCount.gateway = 0;
+        // Fall through to restart logic
+      } else {
+        return;
+      }
+    }
 
     // If process ran for >30s, it wasn't a crash loop — reset counter
     const uptimeMs = Date.now() - startedAt;
@@ -103,9 +114,10 @@ function startAll() {
   log('launcher', 'Starting DonClaudioBot v2...');
 
   // Start OpenClaw Gateway
-  // Use npx to run openclaw from node_modules (no global install needed)
-  processes.gateway = spawnProcess('gateway', 'npx', [
-    'openclaw',
+  // Run openclaw directly (not via npx) to avoid wrapper process that doesn't
+  // propagate signals — critical for clean SIGTERM restarts
+  processes.gateway = spawnProcess('gateway', 'node', [
+    'node_modules/openclaw/openclaw.mjs',
     'gateway',
     '--bind', process.env.OPENCLAW_GATEWAY_BIND || 'lan',
     '--port', process.env.OPENCLAW_GATEWAY_PORT || '18789',
@@ -172,6 +184,15 @@ function shutdownAll(exitCode = 0) {
 // Handle signals
 process.on('SIGTERM', () => shutdownAll(0));
 process.on('SIGINT', () => shutdownAll(0));
+
+// Handle SIGUSR1: restart gateway only (sent by session watcher after agent creation)
+process.on('SIGUSR1', () => {
+  log('launcher', 'Received SIGUSR1 — restarting gateway...');
+  if (processes.gateway) {
+    intentionalGatewayRestart = true;
+    processes.gateway.kill('SIGTERM');
+  }
+});
 
 // Handle uncaught errors
 process.on('uncaughtException', (err) => {

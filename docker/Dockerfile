@@ -11,7 +11,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Install gog CLI for sandbox (Google OAuth)
-RUN curl -L https://github.com/steipete/gogcli/releases/download/v0.8.0/gogcli_0.8.0_linux_amd64.tar.gz \
+RUN curl -L https://github.com/steipete/gogcli/releases/download/v0.9.0/gogcli_0.9.0_linux_amd64.tar.gz \
       | tar -xz -C /usr/local/bin && \
       chmod +x /usr/local/bin/gog
 

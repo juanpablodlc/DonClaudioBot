@@ -13,7 +13,7 @@
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"
   },
   "dependencies": {
-    "openclaw": "2026.1.30"
+    "openclaw": "2026.2.6"
   },
   "devDependencies": {
     "@types/express-rate-limit": "^5.1.3",

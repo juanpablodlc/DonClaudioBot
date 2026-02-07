@@ -1,5 +1,43 @@
 # Progress Log
 
+## Session: 2026-02-06 (Gateway Restart IPC Fix + dmScope Fix + Production Log Analysis)
+
+**Timeline of events:**
+1. Diagnosed gateway restart failure: `npx openclaw gateway` creates 2-process tree, pkill leaves child alive holding port
+2. Implemented SIGUSR1 launcher IPC: session watcher → `process.kill(process.ppid, 'SIGUSR1')` → launcher SIGTERM→respawn
+3. Eliminated npx wrapper: `node node_modules/openclaw/openclaw.mjs gateway` (single process, clean signals)
+4. Deployed to Hetzner, tested manually with `kill -USR1 1` — perfect restart cycle confirmed
+5. Fixed dmScope: entrypoint was warning but not fixing. Changed to self-healing (`session.dmScope`, not `gateway.dmScope`)
+6. Production log analysis: 6 real users onboarded, all routing correctly
+7. Identified: dropped message during gateway restart (+56923777467 at 17:15:39), welcome agent duplication (8 copies)
+8. Documented Patterns 62-65 in findings.md, updated ARCHITECTURE_REPORT.md (SIGUSR2→SIGUSR1, npx→direct node)
+
+**Files modified:**
+- `launcher.js` — SIGUSR1 handler, intentionalGatewayRestart flag, direct node gateway spawn
+- `onboarding/src/services/session-watcher.ts` — `process.kill(process.ppid, 'SIGUSR1')` replaces pkill
+- `docker/docker-entrypoint.sh` — Self-healing `session.dmScope`, cleanup of mistaken `gateway.dmScope`
+- `ARCHITECTURE_REPORT.md` — All SIGUSR2→SIGUSR1, npx→direct node, new gotchas
+- `findings.md` — Updated Patterns 60-61, added Patterns 62-65
+
+**Key discoveries:**
+- Pattern 62: npx wrapper doesn't propagate signals — use direct node invocation
+- Pattern 63: dmScope belongs under `session`, not `gateway`
+- Pattern 64: In-flight messages dropped during gateway restart (known limitation)
+- Pattern 65: Welcome agent duplication from grep on JSON5 (fix needed)
+
+**Verification:**
+- ✅ Gateway restart via SIGUSR1 tested in production (clean cycle, new bindings picked up)
+- ✅ 6 users routing to dedicated agents correctly
+- ✅ dmScope self-healing works on existing volumes
+- 🔲 Welcome agent duplication fix (identified, not yet fixed)
+- 🔲 Dropped message mitigation (identified, no fix designed)
+
+**Git commits:**
+- `8d0e041` fix: Gateway restart via launcher IPC instead of pkill
+- `3b875c3` fix: Set session.dmScope (not gateway.dmScope) in entrypoint
+
+---
+
 ## Session: 2026-02-06 (Auto-Onboarding: Welcome Agent + Session Watcher + Gateway Restart Fix)
 
 **Timeline of events:**

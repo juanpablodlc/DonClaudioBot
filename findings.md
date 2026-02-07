@@ -649,20 +649,167 @@ To:
 3. `on-message.ts:66` uses `params.cfg` (the stale closure snapshot) for `resolveAgentRoute()`, never re-reading from disk
 **Evidence:** `loadConfig()` in `io.ts` has a 200ms TTL cache — designed for dynamic reads. But `monitorWebChannel` never calls it again after startup. The `createWebOnMessageHandler({ cfg, ... })` call at `monitor.ts:160` passes the startup config into the handler's closure permanently.
 **The "none" classification:** `config-reload.ts` BASE_RELOAD_RULES_TAIL has `{ prefix: "bindings", kind: "none" }`. "none" means "this section is read dynamically, no reload action needed." This is wrong for bindings — they're cached in the monitor closure.
-**Fix (workaround):** After creating a new agent binding, kill the Gateway process with SIGUSR2. Launcher.js auto-restarts it within 2 seconds. The fresh Gateway calls `monitorWebChannel` → `loadConfig()` → picks up new bindings.
+**Fix:** After creating a new agent binding, session watcher sends SIGUSR1 to launcher (`process.kill(process.ppid, 'SIGUSR1')`). Launcher sets `intentionalGatewayRestart=true` and sends SIGTERM to gateway. On exit, launcher detects the flag, resets restart counter to 0, and respawns gateway. The fresh Gateway calls `monitorWebChannel` → `loadConfig()` → picks up new bindings. (Originally used SIGUSR2 directly to gateway, but `npx` wrapper didn't propagate signals — see Pattern 62.)
 **Files involved:**
 - `.openclaw-reference/src/gateway/config-reload.ts:72` — The "none" rule
 - `.openclaw-reference/src/web/auto-reply/monitor.ts:65,160` — Config captured in closure
 - `.openclaw-reference/src/web/auto-reply/monitor/on-message.ts:66` — Uses stale `params.cfg`
-- `onboarding/src/services/session-watcher.ts` — Sends SIGUSR2 after agent creation
-- `launcher.js` — Auto-restarts gateway, resets counter after 30s stable run
+- `onboarding/src/services/session-watcher.ts` — Sends SIGUSR1 to launcher after agent creation
+- `launcher.js` — SIGUSR1 handler, intentional restart flag, auto-restarts gateway
 **Prevention:** When integrating with OpenClaw's config system, test that changes are actually picked up at runtime — don't trust the "config change applied" log message. For bindings specifically, always restart the Gateway.
 
 ### Pattern 61: Launcher Restart Counter Must Reset for Intentional Restarts
 **Symptom:** After 3 new users onboard, launcher gives up restarting gateway ("exceeded max restarts")
-**Root Cause:** Each agent creation triggers a gateway SIGUSR2 kill + auto-restart. Launcher's `MAX_RESTARTS=3` counter increments on each restart. After 3 users, counter hits max and launcher shuts down everything.
-**Fix:** Reset restart counter to 0 if the process ran for >30 seconds before exiting. A process that ran 30s+ was stable (not crash-looping), so the next restart is intentional, not a crash.
-**Prevention:** When using process managers with restart limits, distinguish between crash restarts (rapid exit) and intentional restarts (stable run then signal).
+**Root Cause:** Each agent creation triggers a SIGUSR1→SIGTERM gateway restart cycle. Launcher's `MAX_RESTARTS=3` counter increments on each restart. After 3 users, counter hits max and launcher shuts down everything.
+**Fix:** Launcher uses `intentionalGatewayRestart` flag — set to true on SIGUSR1, checked in exit handler. When flag is set, counter resets to 0 immediately (not after 30s uptime). This allows unlimited intentional restarts while still protecting against crash loops.
+**Prevention:** When using process managers with restart limits, distinguish between crash restarts (rapid exit) and intentional restarts (signaled by parent/sibling).
+
+### Pattern 62: npx Wrapper Doesn't Propagate Signals to Child Process
+**Symptom:** `pkill -KILL -f "openclaw gateway"` kills the npx wrapper but leaves the actual gateway child alive, holding port 18789 and the PID lock. New gateway can't start, burns through MAX_RESTARTS, container crashes.
+**Root Cause:** `npx openclaw gateway` spawns a wrapper process that spawns the actual gateway as a child. SIGTERM/SIGKILL to the wrapper doesn't propagate to the child. The child becomes an orphan still bound to the port.
+**Fix:** Run gateway directly: `node node_modules/openclaw/openclaw.mjs gateway` — single process, `proc.kill('SIGTERM')` directly controls it. No orphaned children.
+**Prevention:** Never use `npx` for long-running processes that need signal handling. Use direct `node` invocation. `node_modules/.bin/openclaw` is just a symlink to `../openclaw/openclaw.mjs`.
+
+### Pattern 63: dmScope Belongs Under `session`, Not `gateway`
+**Symptom:** Gateway crashes with `Invalid config: Unrecognized key: "dmScope"` after setting `gateway.dmScope`.
+**Root Cause:** OpenClaw strict schema rejects unknown keys under `gateway`. The `dmScope` setting lives under `session` (see `config/openclaw.json.template:28-30`).
+**Fix:** Use `session.dmScope: 'per-channel-peer'`. Updated entrypoint to set correct path and clean up mistaken `gateway.dmScope` if present.
+**Prevention:** Always check the template for correct config key paths before using `openclaw config set` or writing migration scripts.
+
+### Pattern 64: In-Flight Messages Dropped During Gateway Restart
+**Symptom:** User +56923777467 sent a message at 17:15:39, got no reply. Gateway was restarted 2 seconds later for another user's onboarding.
+**Root Cause:** SIGTERM kills the Gateway process immediately, including any in-flight LLM requests. There's no graceful drain — the request is simply lost. No retry mechanism exists.
+**Impact:** Every gateway restart (for new user onboarding) creates a ~2-5 second window where active conversations can lose messages silently.
+**Mitigation (not yet implemented):** Consider queuing/batching gateway restarts, or adding a drain period before SIGTERM.
+**Prevention:** Be aware that gateway restarts have a blast radius beyond the new user being onboarded. Monitor for "orphaned user message" warnings in logs.
+
+### Pattern 65: Welcome Agent Duplication From Entrypoint grep on JSON5
+**Symptom:** 8 copies of welcome agent in `openclaw.json` agents.list after multiple container restarts.
+**Root Cause:** Entrypoint uses `grep -q '"welcome"'` to check if welcome agent exists. OpenClaw config is JSON5 (unquoted keys), so `grep '"welcome"'` (looking for double-quoted string) may fail depending on how JSON5.stringify() formats the output. Each failure causes welcome agent to be prepended again.
+**Fix needed:** Replace `grep -q '"welcome"'` with `node -e` using JSON5.parse() to check if any agent has `id === 'welcome'`.
+**Prevention:** Never use grep/sed on JSON5 files. Always use `node -e` with the `json5` package for config inspection.
+
+---
+
+## Phase 12 Research: `message_received` Plugin Hook (2026-02-07)
+
+### Pattern 66: `message_received` Plugin Hook IS Implemented (Docs Mislabel It)
+**Symptom:** ARCHITECTURE_REPORT.md and Pattern 43 say `message:received` is a "Future Event" and not yet implemented.
+**Root Cause:** There are TWO separate hook systems in OpenClaw:
+  1. **Internal hooks** (HOOK.md files): Only support `command`, `session`, `agent`, `gateway` events. The "Future Events" label refers to THIS system.
+  2. **Plugin hooks** (api.on()): Support `message_received`, `message_sent`, `before_agent_start`, `agent_end`, etc. These ARE implemented and live.
+**Evidence:**
+  - `.openclaw-reference/src/auto-reply/reply/dispatch-from-config.ts:137-183` — `message_received` fired via `hookRunner.runMessageReceived()` with full metadata (senderE164, senderId, senderName, content, timestamp)
+  - `.openclaw-reference/src/plugins/types.ts:480-488` — Handler type: `(event: PluginHookMessageReceivedEvent, ctx: PluginHookMessageContext) => Promise<void> | void`
+  - `.openclaw-reference/src/hooks/internal-hooks.ts:11` — Internal hooks only: `"command" | "session" | "agent" | "gateway"` (no message_received)
+  - **Live test on server (2026-02-07):** Plugin created at `~/.openclaw/extensions/message-test/`, gateway restarted, message sent → `/tmp/message-received.log` confirmed: `from=+13128749154 e164=+13128749154 channel=whatsapp content=Hello!`
+**Status:** `message_received` is LIVE and WORKING in OpenClaw 2026.1.30.
+**Prevention:** Don't confuse "internal hooks" (HOOK.md) with "plugin hooks" (api.on). They are completely separate systems with different event types.
+
+### Pattern 67: Plugin Hooks Cannot Modify Routing (Observe-Only)
+**Symptom:** Hope that `message_received` could reroute messages to a different agent (bypassing bindings).
+**Root Cause:** The `message_received` hook returns `void`. There is no `ctx.routeTo()`, `event.overrideAgent`, or any mechanism to change the routing decision. The hook is fire-and-forget, observe-only.
+**Evidence (DeepWiki 2026-02-07):**
+  - `message_received` fires BEFORE `resolveAgentRoute()` — it sees the message early, but cannot influence where it goes.
+  - Handler return type is `Promise<void> | void` — no return value consumed by the routing pipeline.
+  - By contrast, `message_sending` hook CAN modify outgoing messages or cancel them. If routing override were intended for `message_received`, similar API would exist.
+**Implication:** The Welcome Agent is still required as the catch-all for first messages from unknown users. The plugin can detect the unknown user instantly, but it cannot redirect the message to the newly created dedicated agent.
+**Prevention:** Don't build architecture around plugins modifying message routing. Plugins observe; bindings route.
+
+### Pattern 68: Bindings Hot-Reload Bug STILL NOT Fixed (Even in Latest Version)
+**Symptom:** After writing a new binding to `openclaw.json`, Gateway logs "config change applied" but messages continue routing to the wrong agent.
+**Root Cause (CONFIRMED STILL PRESENT via DeepWiki 2026-02-07):**
+  1. `config-reload.ts` BASE_RELOAD_RULES_TAIL: `{ prefix: "bindings", kind: "none" }` — classifies binding changes as no-op
+  2. `monitorWebChannel` calls `loadConfig()` ONCE at startup, captures in closure
+  3. `resolveAgentRoute()` uses stale `params.cfg` from that closure
+  4. The "none" classification means the fs.watch() change detection fires, logs a message, but takes NO action
+**Current workaround:** SIGUSR1 → Launcher → SIGTERM Gateway → respawn (Pattern 60). This remains necessary.
+**Note on `gateway.reload.mode`:** Setting it to `"restart"` would auto-restart on ANY config change, but that's heavy-handed (restarts on plugin changes, model changes, etc.). The targeted SIGUSR1 approach is more surgical.
+**Prevention:** Gateway restart for new bindings is unavoidable until OpenClaw patches `config-reload.ts` to treat bindings as `kind: "restart"` or `kind: "hot"`.
+
+### Pattern 69: Plugin API Has No Config Reload, Agent Creation, or Restart Methods
+**Symptom:** Hope that a plugin could create agents, add bindings, or trigger config reload from within its own code.
+**Root Cause:** The `OpenClawPluginApi` object exposes:
+  - `api.on()` — hook registration
+  - `api.config` — read-only config access
+  - `api.registerTool()`, `api.registerHttpHandler()`, `api.registerChannel()`, `api.registerService()`, `api.registerCommand()`, `api.registerCli()`, `api.registerGatewayMethod()`
+  - `api.runtime` — core helpers (media, mentions, groups, debounce)
+  - `api.logger` — plugin-scoped logger
+  But NOT:
+  - `api.createAgent()` — doesn't exist
+  - `api.addBinding()` — doesn't exist
+  - `api.reloadConfig()` — doesn't exist
+  - `api.restart()` — doesn't exist
+**Implication:** The plugin cannot self-service agent creation. It must call the Onboarding Service's HTTP webhook (`POST /webhook/onboarding`) to trigger agent creation. The existing agent-creator.ts + config-writer.ts + SIGUSR1 restart chain stays intact.
+**Prevention:** Plugins are for observation and extension, not for core config manipulation. Always call back to the Onboarding Service for agent lifecycle operations.
+
+### Pattern 70: `sessions_send` Tool Exists But Is Agent-Only (Not Plugin API)
+**Symptom:** DeepWiki mentions `sessions_send` can send messages to a specific agent by session key, bypassing binding-based routing.
+**Root Cause:** `sessions_send` is an **agent tool** (used by agents during conversations), not a plugin API method. A plugin's `message_received` handler has no way to call `sessions_send` — it would need to go through the agent RPC system.
+**Implication:** Cannot use this to forward the first message from the Welcome Agent to the newly created dedicated agent. The first message is still "lost" to the Welcome Agent (but the Welcome Agent's response is useful — it tells the user their assistant is being set up).
+**Prevention:** Agent tools and plugin APIs are separate namespaces. Don't assume one can call the other.
+
+### Pattern 71: Plugin Manifest Minimum Requirements
+**Symptom:** Plugin silently skipped (not loaded) despite correct `index.ts`.
+**Root Cause:** `loader.ts:227-228` skips plugin candidates without `openclaw.plugin.json` manifest. Without the manifest, the plugin is invisible.
+**Minimum valid manifest:**
+```json
+{"id":"message-test","configSchema":{}}
+```
+**More robust (from e2e tests):**
+```json
+{"id":"message-test","configSchema":{"type":"object","properties":{}}}
+```
+**Evidence:** Our test used the bare `{}` for configSchema and it loaded successfully (`npx openclaw plugins list` showed status: `loaded`).
+**Required fields:** `id` (non-empty string) + `configSchema` (object). Everything else optional.
+**Prevention:** Always create `openclaw.plugin.json` alongside `index.ts`. Use `npx openclaw plugins list` to verify loading.
+
+### Pattern 72: Global Plugins Auto-Enable From `~/.openclaw/extensions/`
+**Symptom:** Worried that plugin needs to be registered in `openclaw.json` config.
+**Root Cause:** Plugins in `~/.openclaw/extensions/<name>/` are auto-discovered and auto-enabled by default. `resolveEnableState()` returns `{ enabled: true }` for global extensions. No `openclaw.json` changes needed.
+**Evidence:** Test plugin at `~/.openclaw/extensions/message-test/` loaded automatically after gateway restart. `npx openclaw plugins list` showed it alongside 30+ built-in plugins.
+**Entry point search order:** `index.ts` → `index.js` → `index.mjs` → `index.cjs`
+**TypeScript support:** Plugins loaded via `jiti` — TypeScript files work directly without compilation.
+**Gateway restart required:** No hot-reload for new plugins. Must restart gateway to pick up new/changed plugins.
+**Prevention:** For test plugins, just create the directory + files + restart gateway. For production plugins, include in the Docker image or volume.
+
+### Pattern 73: `message_received` Event Data — Full Reference
+**Event object (`event`):**
+```typescript
+{
+  from: string,              // e.g., "+13128749154" (E.164)
+  content: string,           // message text
+  timestamp: number,         // Unix timestamp
+  metadata: {
+    senderE164: string,      // e.g., "+13128749154" (redundant with from)
+    senderId: string,        // platform-specific sender ID
+    senderName: string,      // display name (if available)
+    // ... additional platform-specific fields
+  }
+}
+```
+**Context object (`ctx`):**
+```typescript
+{
+  channelId: string,         // e.g., "whatsapp"
+  accountId: string,         // account identifier
+  conversationId: string     // conversation/session ID
+}
+```
+**Firing order:** BEFORE `resolveAgentRoute()` — catches ALL inbound messages regardless of which agent they route to.
+**Execution:** Fire-and-forget — errors in the hook handler are caught and logged but don't block message processing.
+
+### Pattern 74: Bindings Bug Is a 3-Line Fix — `loadConfig()` Has 200ms Cache By Design
+**Discovery:** `io.ts:532` defines `DEFAULT_CONFIG_CACHE_MS = 200`. `loadConfig()` was DESIGNED for per-request dynamic reads — it caches for 200ms then re-reads from disk. The bug is that `monitorWebChannel` (monitor.ts:65) calls it ONCE and captures the result, instead of calling it per-message for routing.
+**Fix (PR A):** Change `resolveAgentRoute({ cfg: params.cfg, ... })` to `resolveAgentRoute({ cfg: loadConfig(), ... })` in:
+  - `src/web/auto-reply/monitor/on-message.ts:66`
+  - `src/telegram/bot-message-context.ts:166`
+  - `src/telegram/bot.ts:424`
+**Impact:** Bindings become truly dynamic. No gateway restart needed. `kind: "none"` classification becomes correct.
+**Warning:** DeepWiki claims bindings are already hot-reloadable — this is WRONG. Source code proves otherwise.
+
+### Pattern 75: All Channel Monitors Share the Same Stale-Config Bug
+**Discovery:** Not just WhatsApp. Telegram (`bot.ts:117`, `bot-message-context.ts:166`) also captures `cfg = loadConfig()` once at startup and passes it to all routing calls. Discord likely same pattern (`discord/monitor/message-handler.ts`). The PR fix benefits ALL channels.
 
 ## Visual/Browser Findings
 <!--

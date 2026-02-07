@@ -40,7 +40,7 @@ Hetzner VPS (Docker Compose)
 │       ├── Session Watcher (polls welcome agent sessions.json)
 │       ├── Agent Creator (writes config + binding + workspace)
 │       ├── State Manager (SQLite: phone → agent_id)
-│       └── SIGUSR2 → Gateway (triggers restart for binding pickup)
+│       └── SIGUSR1 → Launcher → SIGTERM Gateway (restart for binding pickup)
 │
 ├── Per-User Sandbox Containers
 │   ├── user_<hex> (dedicated agent per user)
@@ -78,12 +78,12 @@ User sends WhatsApp message
                                ├─ Create agent: ID, workspace, templates, sandbox config
                                ├─ Write binding to openclaw.json (Zod .strict() validated)
                                ├─ Record in SQLite
-                               └─ Send SIGUSR2 to Gateway → launcher auto-restarts it
+                               └─ Send SIGUSR1 to Launcher → SIGTERM Gateway → auto-restart
                                   │
                                   └─ Next message routes to dedicated agent ✓
 ```
 
-**Why SIGUSR2?** OpenClaw has a bug: `config-reload.ts` classifies `bindings` as `kind: "none"` (assumes dynamic read), but `monitorWebChannel` captures config in a closure at startup and never refreshes. New bindings are invisible until Gateway restarts. See `findings.md` Pattern 60 for the full source-code trace.
+**Why SIGUSR1 to Launcher (not directly to Gateway)?** OpenClaw has a bug: `config-reload.ts` classifies `bindings` as `kind: "none"` (assumes dynamic read), but `monitorWebChannel` captures config in a closure at startup and never refreshes. New bindings are invisible until Gateway restarts. Session watcher sends SIGUSR1 to launcher (its parent process via `process.ppid`), launcher sets `intentionalGatewayRestart=true` and sends SIGTERM to gateway. On exit, launcher detects the intentional flag, resets restart counter to 0, and respawns gateway cleanly. Direct signals to gateway were unreliable — `npx` wrapper didn't propagate them (Pattern 62). See `findings.md` Patterns 60, 62 for details.
 
 **Why a Welcome Agent?** Previous design (no default agent) dropped first messages silently. The Welcome Agent provides immediate feedback while the dedicated agent is being created (~2-5 seconds including Gateway restart).
 
@@ -95,14 +95,14 @@ User sends WhatsApp message
 |---|----------|-----------|
 | 1 | **Session Watcher, not Baileys sidecar** | Baileys can't coexist with Gateway (both open WhatsApp WebSocket). Session watcher polls `sessions.json` instead — no second connection needed. |
 | 2 | **Welcome Agent as default** | Catches unknown users safely (zero personal data). Replaces "no default agent" design that dropped first messages. |
-| 3 | **SIGUSR2 Gateway restart** | Only reliable way to pick up new bindings. Launcher resets restart counter after 30s stable uptime to avoid crash-loop limit. |
+| 3 | **SIGUSR1 Gateway restart via Launcher IPC** | Only reliable way to pick up new bindings. Session watcher sends SIGUSR1 to launcher (`process.ppid`), launcher SIGTERM→respawns gateway. Counter resets to 0 on intentional restart (not after 30s). |
 | 4 | **Zod .strict() on bindings** | Privacy breach root cause was unknown keys in bindings breaking OpenClaw's validator. Strict validation catches this before config write. |
 | 5 | **OAuth-in-Sandbox via XDG_CONFIG_HOME** | `gogcli` uses `os.UserConfigDir()`, not `GOG_CONFIG_DIR` (env var doesn't exist). `XDG_CONFIG_HOME` isolates each agent's tokens. |
 | 6 | **SQLite with WAL + UNIQUE constraints** | Single-file, in-process, concurrent readers, handles race conditions via UNIQUE on phone_number. |
 | 7 | **Atomic config writes** | `proper-lockfile` + temp file + rename. Prevents corruption from concurrent agent creation. |
 | 8 | **Phone prefix → language routing** | `config/phone-language-map.json` maps country codes to template folders. Add language = add folder + one JSON line. |
 | 9 | **JSON5 for OpenClaw config** | OpenClaw uses JSON5 (unquoted keys, comments). Always use `json5` package, never `JSON.parse()`. |
-| 10 | **Dual-process launcher** | Gateway (`npx openclaw gateway`) + Onboarding (`node dist/index.js`) as independent processes. Enables SIGUSR2 restart of Gateway without affecting Onboarding. |
+| 10 | **Dual-process launcher** | Gateway (`node node_modules/openclaw/openclaw.mjs gateway`) + Onboarding (`node dist/index.js`) as independent processes. Enables SIGUSR1-mediated restart of Gateway without affecting Onboarding. No `npx` wrapper — direct node invocation ensures clean signal handling. |
 
 ---
 
@@ -139,7 +139,7 @@ User sends WhatsApp message
 ### OpenClaw Framework
 | Gotcha | Detail |
 |--------|--------|
-| **Bindings need Gateway restart** | `config-reload.ts` classifies bindings as `kind: "none"` (assumes dynamic read), but `monitorWebChannel` captures config in a closure at startup. New bindings invisible until restart. We send SIGUSR2 automatically. |
+| **Bindings need Gateway restart** | `config-reload.ts` classifies bindings as `kind: "none"` (assumes dynamic read), but `monitorWebChannel` captures config in a closure at startup. New bindings invisible until restart. Session watcher sends SIGUSR1 to launcher, which SIGTERM→respawns gateway automatically. |
 | **Config is JSON5, not JSON** | Unquoted keys, trailing commas. `JSON.parse()` fails silently. Always use `json5` package or `openclaw config get/set` CLI. |
 | **`openclaw status` lies** | Reports cached config state, not real WebSocket health. Can show "OK" for hours after connection dies. Check Gateway logs for recent `[whatsapp] Listening...` entries instead. |
 | **Sessions are sticky** | Once created (e.g., `agent:welcome:whatsapp:dm:+1555`), sessions persist until `/new`, `/reset`, or 4am daily expiry. A catch-all agent traps users in the wrong agent. |
@@ -166,6 +166,9 @@ User sends WhatsApp message
 | **grep doesn't work on JSON5** | `grep '"key"'` misses unquoted keys in JSON5. Always use `node -e` with `JSON5.parse()` for config inspection. |
 | **SQLite: double quotes = column identifiers** | `datetime("now")` treats `"now"` as a column name. Always use single quotes: `datetime('now')`. |
 | **`dmScope` must be set from first boot** | If `openclaw.json` doesn't exist when first agent is created, OpenClaw defaults to `dmScope: 'main'` — ALL DMs share one session. This caused our privacy breach. |
+| **`dmScope` lives under `session`, not `gateway`** | Setting `gateway.dmScope` causes Gateway crash: `Unrecognized key: "dmScope"`. Correct location: `session.dmScope: 'per-channel-peer'`. Template has it right, but entrypoint migration got it wrong initially. |
+| **In-flight messages dropped during Gateway restart** | SIGTERM kills the Gateway mid-LLM-request. Any message being processed is lost — no retry, no error to user. Observed: user's message at T+0 had no reply because gateway restarted at T+2s for another user's onboarding. |
+| **Welcome agent duplication on restart** | Entrypoint's `grep -q '"welcome"'` fails on JSON5 (unquoted keys). Welcome agent gets prepended on every container start. After 8 restarts = 8 welcome agents in config. Use `node -e` with JSON5.parse() instead of grep. |
 
 ### OAuth (gog CLI)
 | Gotcha | Detail |
@@ -183,12 +186,12 @@ User sends WhatsApp message
 
 | Process | Command | Purpose | Restart |
 |---------|---------|---------|---------|
-| Gateway | `npx openclaw gateway --bind lan --port 18789` | WhatsApp routing, agent sessions | Auto (max 3), counter resets after 30s stable uptime |
+| Gateway | `node node_modules/openclaw/openclaw.mjs gateway --bind lan --port 18789` | WhatsApp routing, agent sessions | Auto (max 3), counter resets to 0 on intentional SIGUSR1 restart |
 | Onboarding | `node onboarding/dist/index.js` | Session watcher, agent creation, SQLite | Auto (max 3) |
 
 **Inter-process communication:**
 - Shared state: both read/write `~/.openclaw/openclaw.json`
-- SIGUSR2: Onboarding → Gateway (triggers restart for binding pickup)
+- SIGUSR1: Onboarding → Launcher → SIGTERM Gateway → respawn (triggers restart for binding pickup)
 - No RPC, no message bus
 
 **Shutdown:** SIGTERM/SIGINT → graceful (5s timeout) → SIGKILL.
@@ -330,9 +333,9 @@ Each row is a design that failed and the pivot that replaced it. Read this to av
 | 1 | **v1 "Clawd4All":** OAuth during onboarding conversation | Tokens persisted before sandbox existed. User 2+ never worked — tokens stored in user 1's context. | **v2:** Create agent + sandbox FIRST, then OAuth in that agent's context. |
 | 2 | **LLM-driven onboarding agent** | Unpredictable, slow, fragile. Agent forgot steps, asked wrong questions, got stuck in loops. | **Deterministic Node.js service** with SQLite state. No LLM in the onboarding path. |
 | 3 | **No default agent** (drop first message) | Users texted the bot and got silence. Confused, they stopped trying. Terrible UX. | **Welcome Agent** (zero personal data, multilingual). Immediate response while dedicated agent is created. |
-| 4 | **Catch-all "onboarding" agent** with `default: true` | Sticky sessions trapped users. Once routed to onboarding agent, they stayed there even after dedicated agent was created. Sessions persist until `/new`, `/reset`, or 4am. | **Welcome Agent + Session Watcher.** Welcome agent has no personal data (safe if stuck). Session watcher auto-creates dedicated agent + SIGUSR2 restarts Gateway. |
+| 4 | **Catch-all "onboarding" agent** with `default: true` | Sticky sessions trapped users. Once routed to onboarding agent, they stayed there even after dedicated agent was created. Sessions persist until `/new`, `/reset`, or 4am. | **Welcome Agent + Session Watcher.** Welcome agent has no personal data (safe if stuck). Session watcher auto-creates dedicated agent + SIGUSR1→Launcher IPC restarts Gateway. |
 | 5 | **Baileys sidecar** to detect new users | WhatsApp allows only ONE WebSocket per phone. Baileys sidecar and Gateway fought for the connection — infinite reconnect loop, messages silently dropped. | **Session watcher** polls `sessions.json` every 5s. No second WebSocket needed. |
-| 6 | **Hot reload for new bindings** (trust `fs.watch()`) | OpenClaw logs "config change applied" but `monitorWebChannel` captures config in a closure at startup. New bindings are invisible. We trusted the log message for hours. | **SIGUSR2 Gateway restart** after each agent creation. Launcher auto-restarts within 2s. Counter resets after 30s stable uptime. |
+| 6 | **Hot reload for new bindings** (trust `fs.watch()`) | OpenClaw logs "config change applied" but `monitorWebChannel` captures config in a closure at startup. New bindings are invisible. We trusted the log message for hours. | **SIGUSR1→Launcher IPC Gateway restart** after each agent creation. Session watcher sends SIGUSR1 to launcher (parent PID), launcher SIGTERM→respawns gateway within 2s. Counter resets to 0 on intentional restart. |
 | 7 | **`GOG_CONFIG_DIR` env var** for OAuth token isolation | This env var doesn't exist in gogcli. 3 days of circular debugging. gog uses Go's `os.UserConfigDir()` which only respects `XDG_CONFIG_HOME`. | **`XDG_CONFIG_HOME=/workspace/.gog-config`** — properly isolates each agent's OAuth tokens. |
 | 8 | **Read-only bind mount** for shared OAuth credentials | "Poison pill" — when agents forgot `--client` flag, gog found the read-only file at default path and failed with cryptic error. | **Copy credentials via `setupCommand`**, set as default client. Agents run `gog auth add <email>` with zero flags. Fail-safe > agent memory. |
 
@@ -360,11 +363,11 @@ These aren't typos or config mistakes. These are the bugs that cost hours/days a
 ### The Stale Config Closure (Pattern 60) — *Most deceptive*
 **What happened:** New agent binding written to config. Gateway logged "config change applied (dynamic reads: bindings)." But messages kept routing to welcome agent. We trusted the log for hours, tried clearing sessions, restarting services — nothing worked until full Gateway restart.
 **Root cause:** We read OpenClaw's actual source code. `config-reload.ts:72` classifies bindings as `kind: "none"`. `monitorWebChannel` calls `loadConfig()` once at startup, captures it in a closure forever. The log message is technically correct ("dynamic reads: bindings") but misleading — the monitor never dynamically reads.
-**What changed:** Session watcher sends SIGUSR2 to gateway after every agent creation. Launcher auto-restarts it. We no longer trust "config change applied" log messages.
+**What changed:** Session watcher sends SIGUSR1 to launcher (not directly to gateway — `npx` wrapper didn't propagate signals). Launcher does clean SIGTERM→respawn. We no longer trust "config change applied" log messages.
 
 ### Template ≠ Volume (Patterns 2, 39, 46) — *Most repeated*
 **What happened:** Changed `openclaw.json.template`, deployed, nothing changed. Changed it again, deployed again, still nothing. This happened THREE separate times across different phases.
 **Root cause:** Docker named volumes persist data. Template is only copied on first volume creation. `deploy.sh` deploys code, not config.
 **What changed:** Entrypoint now handles migrations (e.g., adding welcome agent to existing config). We document that template changes need corresponding live config migrations. But it still bites us with new changes.
 
-For all 61 patterns, see `findings.md`.
+For all 65 patterns, see `findings.md`.

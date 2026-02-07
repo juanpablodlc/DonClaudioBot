@@ -17,7 +17,7 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-**Phase 11: COMPLETE** — Fix sandbox OAuth (env vars not passed, bind mount path wrong)
+**Phase 12: PENDING** — Replace Session Watcher with `message_received` Plugin (see findings.md Patterns 66-73)
 
 ## Phases
 <!--
@@ -738,6 +738,268 @@ To add a new language (e.g., Portuguese for +55 Brazil):
 
 ---
 
+### Phase 12: Replace Session Watcher With `message_received` Plugin
+<!--
+  WHAT: Replace the 5-second polling session watcher with an event-driven OpenClaw plugin.
+  WHY: Session watcher is a polling workaround (Pattern 60). The `message_received` plugin hook
+       was confirmed WORKING on 2026.1.30 in production (2026-02-07, Pattern 66).
+  CONFIRMED: Works on current OpenClaw 2026.1.30. No version upgrade required.
+  RESEARCH: See findings.md Patterns 66-73 for full DeepWiki validation.
+-->
+
+#### What Changes vs What Stays
+
+**CHANGES (plugin replaces session watcher):**
+| Current (Session Watcher) | New (Plugin) |
+|--------------------------|-------------|
+| ~146 lines in `session-watcher.ts` | ~50 lines in `extensions/onboarding-hook/index.ts` |
+| Polls `sessions.json` every 5 seconds | Event fires instantly on every inbound message |
+| Parses session keys with regex | Gets `event.metadata.senderE164` directly |
+| Started from `onboarding/src/index.ts:38` | Auto-loaded by Gateway from `~/.openclaw/extensions/` |
+| Runs in Onboarding process | Runs in Gateway process |
+
+**STAYS THE SAME (do NOT change these):**
+| Component | Why It Stays |
+|-----------|-------------|
+| **Welcome Agent** | Plugin cannot reroute messages (Pattern 67). First message needs catch-all. |
+| **SIGUSR1 → Launcher → restart Gateway** | Bindings hot-reload bug still NOT fixed (Pattern 68). |
+| **agent-creator.ts + config-writer.ts** | Plugin has no `api.createAgent()` (Pattern 69). Calls webhook instead. |
+| **state-manager.ts (SQLite)** | Idempotency check stays — webhook checks SQLite. |
+| **launcher.js** | SIGUSR1 handler, intentional restart flag, all unchanged. |
+
+#### Architecture After Phase 12
+
+```
+User sends WhatsApp message
+  │
+  ├─ message_received PLUGIN fires (BEFORE routing)
+  │   ├─ senderE164 in cache? → YES → skip
+  │   └─ NO → HTTP POST localhost:3000/webhook/onboarding
+  │          └─ Onboarding Service: SQLite check → createAgent → write binding → SIGUSR1 restart
+  │
+  ├─ Binding exists? → Route to dedicated agent
+  └─ No binding → Route to Welcome Agent
+```
+
+#### Implementation Tasks
+
+**Task 1: Create the production plugin**
+Verify: `ls config/extensions/onboarding-hook/` → `index.ts  openclaw.plugin.json`
+
+Create `config/extensions/onboarding-hook/openclaw.plugin.json`:
+```json
+{"id":"onboarding-hook","configSchema":{}}
+```
+
+Create `config/extensions/onboarding-hook/index.ts`:
+```typescript
+// In-memory cache — prevents HTTP call on every message from known users
+const knownPhones = new Set<string>();
+
+const ONBOARDING_URL = process.env.ONBOARDING_WEBHOOK_URL || "http://localhost:3000/webhook/onboarding";
+const HOOK_TOKEN = process.env.HOOK_TOKEN || "";
+
+export default function register(api: any) {
+  api.on("message_received", async (event: any, ctx: any) => {
+    if (ctx.channelId !== "whatsapp") return;
+    const phone = event.metadata?.senderE164;
+    if (!phone || knownPhones.has(phone)) return;
+
+    // Webhook is idempotent (SQLite UNIQUE), duplicate calls safe
+    try {
+      const resp = await fetch(ONBOARDING_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${HOOK_TOKEN}`,
+        },
+        body: JSON.stringify({ phone }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        knownPhones.add(phone);
+        api.logger?.info?.(`[onboarding-hook] ${data.status}: ${phone} → ${data.agentId || "existing"}`);
+      } else if (resp.status === 409) {
+        knownPhones.add(phone);
+      } else {
+        api.logger?.warn?.(`[onboarding-hook] Webhook returned ${resp.status} for ${phone}`);
+      }
+    } catch (err) {
+      api.logger?.error?.(`[onboarding-hook] Failed for ${phone}: ${err}`);
+    }
+  });
+}
+```
+
+**Task 2: Dockerfile + entrypoint (get plugin into volume)**
+Verify: `docker build` succeeds; `grep onboarding-hook docker/docker-entrypoint.sh` shows copy block.
+
+Volume mount overrides image-layer files. Stage in image, copy to volume via entrypoint.
+
+Dockerfile — add after `COPY config ./config` (line 38):
+```dockerfile
+COPY config/extensions /app/config/extensions
+```
+
+Entrypoint (`docker/docker-entrypoint.sh`) — add BEFORE the final "Starting" echo (line 82, after welcome agent setup):
+```bash
+if [ ! -f "/home/node/.openclaw/extensions/onboarding-hook/openclaw.plugin.json" ]; then
+  mkdir -p /home/node/.openclaw/extensions/onboarding-hook
+  cp /app/config/extensions/onboarding-hook/* /home/node/.openclaw/extensions/onboarding-hook/
+  echo "[entrypoint] Installed onboarding-hook plugin"
+fi
+```
+
+**Task 3: Remove session watcher from Onboarding Service**
+Verify: `npm run build` succeeds; `grep -c sessionWatcher onboarding/dist/index.js` → `0`
+
+Edit `onboarding/src/index.ts`:
+- Remove: `import { startSessionWatcher } from './services/session-watcher.js';` (line 8)
+- Remove: `startSessionWatcher();` (line 38)
+- Keep `session-watcher.ts` file as rollback reference until verified in production.
+
+**Task 4: Update documentation**
+
+Update `ARCHITECTURE_REPORT.md` (Sections 3, 4, 5, 7, 10, 12), `progress.md`, project `MEMORY.md`.
+Clean up test plugin from server: `docker exec don-claudio-bot rm -rf /home/node/.openclaw/extensions/message-test /tmp/message-received.log`
+
+#### Verification Steps
+
+**Deploy:**
+- [ ] `./scripts/deploy.sh`
+- [ ] Plugin loaded: `docker exec don-claudio-bot npx openclaw plugins list | grep onboarding-hook` → `loaded`
+- [ ] Session watcher NOT running: no `[session-watcher] Starting` in logs
+
+**Functional (real WhatsApp messages):**
+- [ ] KNOWN user message → routes to dedicated agent, no webhook call in logs
+- [ ] UNKNOWN user message → plugin calls webhook → agent created → SIGUSR1 → gateway restart → second message routes to new agent
+
+**Regression:**
+- [ ] Existing users still route correctly
+- [ ] Welcome Agent still responds on first message from new user
+
+#### Rollback Plan
+
+1. Remove plugin: `docker exec don-claudio-bot rm -rf /home/node/.openclaw/extensions/onboarding-hook`
+2. Re-add `startSessionWatcher()` in `index.ts`, rebuild, redeploy
+3. `docker exec don-claudio-bot kill -USR1 1` — session watcher resumes in 5s
+
+Rollback is safe: both session watcher and plugin call the same idempotent webhook.
+
+#### Known Limitations (Unchanged)
+
+- **`knownPhones` cache lost on gateway restart** — rebuilt lazily, worst case one extra webhook call per user (returns "existing")
+- **Welcome Agent duplication** (Pattern 65) — separate fix, not this phase
+
+**Status:** pending
+
+---
+
+### Phase 13: RESEARCH — Eliminate Gateway Restarts via OpenClaw PR
+<!--
+  TYPE: Research + PR preparation (NOT implementation in our codebase)
+  WHY: Every new user triggers a gateway restart (SIGUSR1→SIGTERM→respawn).
+       This drops in-flight messages (Pattern 64), causes ~2-5s downtime,
+       and loses knownPhones cache. The root cause is an OpenClaw bug, not ours.
+  GOAL: Prepare a PR for openclaw/openclaw that makes bindings hot-reloadable.
+  DEPENDS ON: Phase 12 (can research in parallel, but the PR would simplify Phase 12's restart chain)
+-->
+
+#### The Bug (3 layers, confirmed in source code)
+
+```
+Layer 1: config-reload.ts:72
+  { prefix: "bindings", kind: "none" }
+  ↑ Classifies binding changes as "no action needed" (assumes dynamic reads)
+
+Layer 2: monitor.ts:65
+  const baseCfg = loadConfig();   // Called ONCE at startup, captured in closure
+  createWebOnMessageHandler({ cfg, ... });   // line 160-174, stale forever
+
+Layer 3: on-message.ts:66-67
+  resolveAgentRoute({ cfg: params.cfg, ... });   // Uses stale snapshot
+```
+
+**The irony:** `loadConfig()` in `io.ts:532` already HAS a 200ms TTL cache (`DEFAULT_CONFIG_CACHE_MS = 200`). It was DESIGNED for per-request dynamic reads. But `monitorWebChannel` never calls it again.
+
+**Same bug in Telegram:** `bot-message-context.ts:166` and `bot.ts:424` also use captured `cfg`.
+
+#### Three PR Approaches (ranked by feasibility)
+
+**PR A — One-line fix per channel (RECOMMENDED)**
+Change routing calls to use `loadConfig()` instead of `params.cfg`:
+```typescript
+// on-message.ts:66 — BEFORE:
+const route = resolveAgentRoute({ cfg: params.cfg, channel: "whatsapp", ... });
+// AFTER:
+const route = resolveAgentRoute({ cfg: loadConfig(), channel: "whatsapp", ... });
+```
+- Same fix in `telegram/bot-message-context.ts:166` and `telegram/bot.ts:424`
+- ~3 lines changed across 3 files. No new abstractions.
+- 200ms cache means no disk I/O per message — perf impact negligible
+- `kind: "none"` classification BECOMES CORRECT (bindings truly are dynamically read now)
+- Highest chance of acceptance: minimal diff, no new APIs, backward-compatible
+
+**PR B — Hot action for bindings (architectural)**
+- Change `bindings` from `kind: "none"` to `kind: "hot"` with `actions: ["refresh-routing"]`
+- Add mutable config reference or event for routing updates in channels
+- ~50-100 lines. More "correct" but more review surface.
+
+**PR C — Route override in plugin hooks (ambitious)**
+- Let `message_received` handler return `{ routeTo: "agentId" }`
+- Eliminates bindings entirely for dynamic routing
+- Major API change. Long shot for acceptance.
+
+#### Impact On Our Architecture If PR A Accepted
+
+| Component | Current | After PR |
+|-----------|---------|----------|
+| SIGUSR1 restart chain | Required for every new user | **ELIMINATED** |
+| In-flight message drops | ~2-5s window per onboarding | **ELIMINATED** |
+| launcher.js SIGUSR1 handler | Complex restart logic | Can simplify (keep for other uses) |
+| Phase 12 plugin | Calls webhook → SIGUSR1 restart | Calls webhook → binding written → **done** |
+| Welcome Agent | Still needed (first message) | Still needed (same) |
+| knownPhones cache | Lost on every restart | **Survives** (no restarts) |
+
+#### Research Tasks
+
+**Task R1: Verify the fix locally**
+- Fork openclaw/openclaw, apply PR A's 3-line change
+- Build, run gateway with WhatsApp channel
+- Write binding to config while running → verify routing picks it up without restart
+- Verify: `npx openclaw plugins list`, send test message, check routing
+
+**Task R2: Check existing issues/PRs**
+- Search openclaw/openclaw GitHub issues for "bindings", "hot reload", "restart", "routing"
+- Check if there's already a fix in progress or a reason it was intentionally `kind: "none"`
+- Check CHANGELOG for any recent changes to config-reload.ts
+
+**Task R3: Write the PR**
+- Title: "fix: Make bindings hot-reloadable by using loadConfig() in routing calls"
+- Body: explain the 3-layer bug, the 200ms cache design intent, affected channels
+- Include before/after test: write binding → verify routing without restart
+- Reference the existing test: `config-reload.test.ts`
+
+**Task R4: Understand edge cases**
+- What if config is written mid-message-processing? (200ms cache → stale for at most 200ms, acceptable)
+- What if config file is corrupted? (`loadConfig()` already handles this — returns last valid)
+- Performance under load? (200ms cache → at most 5 disk reads/second, negligible)
+- Does Discord also have this bug? Check `discord/monitor/message-handler.ts`
+
+**Task R5: Fallback plan if PR rejected**
+- If maintainers prefer PR B or C, estimate effort
+- If they reject all approaches, document why SIGUSR1 chain is permanent
+- Consider: `gateway.reload.mode: "restart"` as heavy-handed alternative (restarts on ALL config changes)
+
+#### DeepWiki Warning
+
+DeepWiki (2026-02-07) claims "bindings related to channels should be picked up without restart" — **THIS IS WRONG**. It confuses channel-level hot-reload (which exists for channel config like `channels.whatsapp.allowFrom`) with bindings-level hot-reload (which doesn't work because `bindings` is `kind: "none"`). Do not trust DeepWiki on this specific topic. Trust the source code.
+
+**Status:** pending
+
+---
+
 ## Key Questions
 <!--
   WHAT: Important questions you need to answer during the task.
@@ -801,6 +1063,27 @@ To add a new language (e.g., Portuguese for +55 Brazil):
 | **Language detection in dedicated function** | Keeps agent-creator.ts clean, testable in isolation, easy to extend |
 | **No manual language override** | Simpler system - let agent handle conversationally if user prefers different language (e.g., +1 user speaks Spanish) |
 | **Accept first message may be dropped** | Better than trapping user in wrong "sticky" session. Users will naturally retry. |
+
+### Phase 12 Decisions (message_received Plugin)
+| Decision | Rationale |
+|----------|-----------|
+| **Replace session watcher with plugin** | Event-driven (instant) vs polling (5s delay). ~146 lines → ~50 lines. No JSON5 parsing. |
+| **Plugin calls existing webhook (not inline)** | Plugin API has no `createAgent()` (Pattern 69). Webhook is idempotent, battle-tested, and handles SQLite + config + restart. |
+| **In-memory `knownPhones` cache** | Prevents HTTP call on every message from known users. Lost on restart = one extra webhook call (returns "existing"). |
+| **Copy plugin via entrypoint, not Dockerfile COPY alone** | Volume mount at `/home/node/.openclaw/` overrides image layer. Entrypoint copies from staged `/app/config/extensions/` to volume. Same pattern as welcome agent migration. |
+| **Keep session-watcher.ts as reference** | Don't delete until Phase 12 verified in production. Enables instant rollback. |
+| **Keep SIGUSR1 restart chain** | Bindings hot-reload bug (Pattern 68) still NOT fixed. No alternative. |
+| **Keep Welcome Agent** | Plugin can't reroute messages (Pattern 67). First message still needs catch-all. |
+| **Use `api.logger` not `console.log`** | Plugin convention — Gateway may redirect plugin logs to separate file. |
+
+### Phase 13 Decisions (Gateway Restart Elimination Research)
+| Decision | Rationale |
+|----------|-----------|
+| **PR A (loadConfig per-route) over PR B/C** | Smallest diff (~3 lines), backward-compatible, uses existing 200ms cache. Highest chance of acceptance. |
+| **Research phase, not implementation** | Fix is in OpenClaw's repo, not ours. Need to fork, test, submit PR, wait for merge. |
+| **Phase 12 independent of Phase 13** | Phase 12 replaces session watcher (polling→event). Phase 13 eliminates restarts. Both valuable independently. |
+| **DeepWiki unreliable on this topic** | Claims bindings are hot-reloadable — proven wrong by source code. Trust `config-reload.ts:72` only. |
+| **Use Node 22 built-in `fetch()`** | No new dependencies. Available in our runtime (node:22-bookworm-slim). |
 
 ### Phase 9 Decisions (Google OAuth)
 | Decision | Rationale |

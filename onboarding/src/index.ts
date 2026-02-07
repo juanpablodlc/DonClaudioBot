@@ -5,7 +5,6 @@ import express from 'express';
 import { initDatabase } from './services/state-manager.js';
 import { router as webhookRouter } from './routes/webhook.js';
 import { router as stateRouter } from './routes/state.js';
-import { startSessionWatcher } from './services/session-watcher.js';
 
 const app = express();
 
@@ -33,9 +32,6 @@ const PORT = process.env.PORT || 3000;
 if (!process.env.HOOK_TOKEN) {
   console.warn('[WARN] HOOK_TOKEN not set - webhook endpoint is insecure!');
 }
-
-// Start session watcher for auto-onboarding (replaces Baileys sidecar)
-startSessionWatcher();
 
 // Start server
 app.listen(PORT, () => {

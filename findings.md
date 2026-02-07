@@ -811,6 +811,34 @@ To:
 ### Pattern 75: All Channel Monitors Share the Same Stale-Config Bug
 **Discovery:** Not just WhatsApp. Telegram (`bot.ts:117`, `bot-message-context.ts:166`) also captures `cfg = loadConfig()` once at startup and passes it to all routing calls. Discord likely same pattern (`discord/monitor/message-handler.ts`). The PR fix benefits ALL channels.
 
+### Pattern 76: Discord CONFIRMED Same Stale-Config Bug (R5 Complete)
+**Discovery (2026-02-07):** Discord channel has identical stale-config routing pattern:
+- `discord/monitor/provider.ts:133` — `const cfg = opts.config ?? loadConfig()` called once at startup
+- `discord/monitor/provider.ts:501` — `createDiscordMessageHandler({ cfg, ... })` passes stale config
+- `discord/monitor/message-handler.ts:23-40` — `params.cfg` stored in closure for all messages
+- `discord/monitor/message-handler.preflight.ts:169-178` — `resolveAgentRoute({ cfg: params.cfg, ... })` uses stale snapshot
+**Impact:** PR A fix must include Discord (`message-handler.preflight.ts:169`). Total: 4 files across 3 channels.
+
+### Pattern 77: GitHub Issues Confirm Bug Is Widely Reported
+**Discovery (2026-02-07):** Searched openclaw/openclaw GitHub issues. Found 3 directly related open issues:
+- **#6602** (2026-02-02): "Multi-agent routing bindings are ignored - messages always go to main agent" — Signal + WhatsApp, 0 comments, exact same bug
+- **#9351** (2026-02-05): "Telegram Bot Routing Broken - accountId Ignored in Bindings" — Telegram multi-account, 0 comments
+- **#10576** (2026-02-06): "feat(telegram): Support per-topic agent routing via bindings" — feature request that would benefit from this fix
+**No existing PRs found** — searched "bindings hot reload", "loadConfig routing", "config-reload bindings". Field is clear.
+**No comments or maintainer responses** on #6602 or #9351 — suggests the issue hasn't been triaged yet.
+
+### Pattern 78: PR A Is Safe — loadConfig() 200ms Cache Analyzed
+**Discovery (2026-02-07):** Full analysis of `loadConfig()` in `config/io.ts:557-579`:
+- Cache key: `configPath` (resolved once per call via `createConfigIO()`)
+- Cache TTL: `DEFAULT_CONFIG_CACHE_MS = 200` (line 532)
+- Cache bypass: `OPENCLAW_DISABLE_CONFIG_CACHE=1` or `OPENCLAW_CONFIG_CACHE_MS=0` env vars
+- Cache update: only on successful parse (stale cache survives corrupted files)
+- Thread safety: synchronous read in single-threaded Node.js, no race conditions
+- Performance: at most 5 disk reads/second under 200ms cache, JSON5 parse <1ms for typical configs
+- `writeConfigFile()` (line 585) calls `clearConfigCache()` — so writes from the same process invalidate immediately
+**Edge case:** Config written by external process (e.g., onboarding service writing via CLI) → 200ms max staleness before picked up. Acceptable vs. 2-5s restart downtime.
+**Conclusion:** PR A has no meaningful performance or safety risks.
+
 ## Visual/Browser Findings
 <!--
   WHAT: Information you learned from viewing images, PDFs, or browser results.

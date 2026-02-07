@@ -1,5 +1,5 @@
 # DonClaudioBot v2 - Architecture Reference
-**Version:** 2.15.0 | **Updated:** 2026-02-06
+**Version:** 2.16.0 | **Updated:** 2026-02-07
 
 ---
 
@@ -37,7 +37,6 @@ Hetzner VPS (Docker Compose)
 │   │   └── Config: ~/.openclaw/openclaw.json (JSON5)
 │   │
 │   └── Process 2: Onboarding Service (Express)
-│       ├── Session Watcher (polls welcome agent sessions.json)
 │       ├── Agent Creator (writes config + binding + workspace)
 │       ├── State Manager (SQLite: phone → agent_id)
 │       └── SIGUSR1 → Launcher → SIGTERM Gateway (restart for binding pickup)
@@ -58,34 +57,28 @@ Hetzner VPS (Docker Compose)
 
 ## 4. Auto-Onboarding Flow
 
-New users are onboarded automatically — no webhook, no manual trigger.
+New users are onboarded automatically via a `message_received` plugin that fires on every inbound WhatsApp message.
 
 ```
 User sends WhatsApp message
   │
+  ├─ message_received PLUGIN fires (BEFORE routing)
+  │   ├─ senderE164 in knownPhones cache? → YES → skip
+  │   └─ NO → HTTP POST localhost:3000/webhook/onboarding
+  │          └─ Onboarding Service: SQLite check → createAgent → write binding → SIGUSR1 restart
+  │
   ├─ Binding exists? ──YES──→ Route to dedicated agent (normal operation)
   │
   └─ No binding ──→ Route to Welcome Agent (default, zero personal data)
-                      │
                       └─ Welcome Agent responds: "Setting up your assistant..."
-                         │
-                         └─ Session created: agent:welcome:whatsapp:dm:+1234567890
-                            │
-                            └─ Session Watcher detects new key (polls every 5s)
-                               │
-                               ├─ Check SQLite (idempotent: skip if exists)
-                               ├─ Detect language from phone prefix (+1→EN, +56→ES)
-                               ├─ Create agent: ID, workspace, templates, sandbox config
-                               ├─ Write binding to openclaw.json (Zod .strict() validated)
-                               ├─ Record in SQLite
-                               └─ Send SIGUSR1 to Launcher → SIGTERM Gateway → auto-restart
-                                  │
-                                  └─ Next message routes to dedicated agent ✓
+                         └─ Next message routes to dedicated agent ✓
 ```
 
-**Why SIGUSR1 to Launcher (not directly to Gateway)?** OpenClaw has a bug: `config-reload.ts` classifies `bindings` as `kind: "none"` (assumes dynamic read), but `monitorWebChannel` captures config in a closure at startup and never refreshes. New bindings are invisible until Gateway restarts. Session watcher sends SIGUSR1 to launcher (its parent process via `process.ppid`), launcher sets `intentionalGatewayRestart=true` and sends SIGTERM to gateway. On exit, launcher detects the intentional flag, resets restart counter to 0, and respawns gateway cleanly. Direct signals to gateway were unreliable — `npx` wrapper didn't propagate them (Pattern 62). See `findings.md` Patterns 60, 62 for details.
+**Why a plugin instead of polling?** The previous Session Watcher polled `sessions.json` every 5s (~146 lines). The `message_received` plugin (~35 lines) fires instantly on every inbound message, detects unknown phones via an in-memory cache, and calls the existing webhook. Event-driven replaces polling. See `findings.md` Patterns 66-73 for plugin research.
 
-**Why a Welcome Agent?** Previous design (no default agent) dropped first messages silently. The Welcome Agent provides immediate feedback while the dedicated agent is being created (~2-5 seconds including Gateway restart).
+**Why SIGUSR1 to Launcher (not directly to Gateway)?** OpenClaw has a bug: `config-reload.ts` classifies `bindings` as `kind: "none"` (assumes dynamic read), but `monitorWebChannel` captures config in a closure at startup and never refreshes. New bindings are invisible until Gateway restarts. The webhook handler sends SIGUSR1 to launcher, which sets `intentionalGatewayRestart=true` and sends SIGTERM to gateway. On exit, launcher detects the intentional flag, resets restart counter to 0, and respawns gateway cleanly. See `findings.md` Patterns 60, 62, 68 for details.
+
+**Why a Welcome Agent?** Plugin hooks cannot modify routing (Pattern 67) — they are observe-only. The first message from an unknown user still routes to the Welcome Agent, which provides immediate feedback while the dedicated agent is being created (~2-5 seconds including Gateway restart).
 
 ---
 
@@ -93,7 +86,7 @@ User sends WhatsApp message
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| 1 | **Session Watcher, not Baileys sidecar** | Baileys can't coexist with Gateway (both open WhatsApp WebSocket). Session watcher polls `sessions.json` instead — no second connection needed. |
+| 1 | **`message_received` plugin, not polling** | Gateway plugin fires instantly on every inbound message. Replaces Session Watcher (5s polling) and Baileys sidecar (WebSocket conflict). Plugin calls existing webhook — ~35 lines vs ~146. |
 | 2 | **Welcome Agent as default** | Catches unknown users safely (zero personal data). Replaces "no default agent" design that dropped first messages. |
 | 3 | **SIGUSR1 Gateway restart via Launcher IPC** | Only reliable way to pick up new bindings. Session watcher sends SIGUSR1 to launcher (`process.ppid`), launcher SIGTERM→respawns gateway. Counter resets to 0 on intentional restart (not after 30s). |
 | 4 | **Zod .strict() on bindings** | Privacy breach root cause was unknown keys in bindings breaking OpenClaw's validator. Strict validation catches this before config write. |
@@ -143,7 +136,7 @@ User sends WhatsApp message
 | **Config is JSON5, not JSON** | Unquoted keys, trailing commas. `JSON.parse()` fails silently. Always use `json5` package or `openclaw config get/set` CLI. |
 | **`openclaw status` lies** | Reports cached config state, not real WebSocket health. Can show "OK" for hours after connection dies. Check Gateway logs for recent `[whatsapp] Listening...` entries instead. |
 | **Sessions are sticky** | Once created (e.g., `agent:welcome:whatsapp:dm:+1555`), sessions persist until `/new`, `/reset`, or 4am daily expiry. A catch-all agent traps users in the wrong agent. |
-| **No `message:received` hook** | Listed as "Future Event" in docs. Can't detect unknown users via hooks. Session watcher polls `sessions.json` as workaround. |
+| **`message_received` IS implemented** | Docs mislabel it as "Future Event" (that's internal hooks only). Plugin hooks (`api.on()`) support `message_received` — confirmed working in OpenClaw 2026.1.30 (Pattern 66). |
 | **Sandbox `docker.env` is broken** | `buildSandboxCreateArgs()` in OpenClaw 2026.1.30 skips `params.cfg.env` entirely. Env vars defined in config never reach the container. Use `setupCommand` workaround. |
 | **Sandbox schema is strict camelCase** | `pidsLimit` not `pids_limit`, `cpus: 0.5` (number) not `"0.5"` (string). No extra keys allowed. |
 | **Sandbox ENTRYPOINT must not be `node`** | OpenClaw runs `sleep infinity` as CMD to keep sandbox alive, then `docker exec` for tools. `ENTRYPOINT ["node"]` makes it run `node sleep infinity` which crashes. |
@@ -168,7 +161,7 @@ User sends WhatsApp message
 | **`dmScope` must be set from first boot** | If `openclaw.json` doesn't exist when first agent is created, OpenClaw defaults to `dmScope: 'main'` — ALL DMs share one session. This caused our privacy breach. |
 | **`dmScope` lives under `session`, not `gateway`** | Setting `gateway.dmScope` causes Gateway crash: `Unrecognized key: "dmScope"`. Correct location: `session.dmScope: 'per-channel-peer'`. Template has it right, but entrypoint migration got it wrong initially. |
 | **In-flight messages dropped during Gateway restart** | SIGTERM kills the Gateway mid-LLM-request. Any message being processed is lost — no retry, no error to user. Observed: user's message at T+0 had no reply because gateway restarted at T+2s for another user's onboarding. |
-| **Welcome agent duplication on restart** | Entrypoint's `grep -q '"welcome"'` fails on JSON5 (unquoted keys). Welcome agent gets prepended on every container start. After 8 restarts = 8 welcome agents in config. Use `node -e` with JSON5.parse() instead of grep. |
+| **Welcome agent duplication on restart** | Entrypoint's `grep -q '"welcome"'` failed on JSON5 (unquoted keys). **Fixed:** Replaced grep with `node -e` + JSON5.parse() and added deduplication logic. |
 
 ### OAuth (gog CLI)
 | Gotcha | Detail |
@@ -186,8 +179,8 @@ User sends WhatsApp message
 
 | Process | Command | Purpose | Restart |
 |---------|---------|---------|---------|
-| Gateway | `node node_modules/openclaw/openclaw.mjs gateway --bind lan --port 18789` | WhatsApp routing, agent sessions | Auto (max 3), counter resets to 0 on intentional SIGUSR1 restart |
-| Onboarding | `node onboarding/dist/index.js` | Session watcher, agent creation, SQLite | Auto (max 3) |
+| Gateway | `node node_modules/openclaw/openclaw.mjs gateway --bind lan --port 18789` | WhatsApp routing, agent sessions, `onboarding-hook` plugin | Auto (max 3), counter resets to 0 on intentional SIGUSR1 restart |
+| Onboarding | `node onboarding/dist/index.js` | Webhook API, agent creation, SQLite | Auto (max 3) |
 
 **Inter-process communication:**
 - Shared state: both read/write `~/.openclaw/openclaw.json`
@@ -239,14 +232,11 @@ ssh root@135.181.93.227 'docker exec don-claudio-bot node -e "
 # What's in the onboarding database?
 ssh root@135.181.93.227 'docker exec don-claudio-bot sqlite3 /home/node/.openclaw/onboarding.db "SELECT phone_number, agent_id, status FROM onboarding_states;"'
 
-# Session watcher activity
-ssh root@135.181.93.227 'cd /root/don-claudio-bot/docker && docker compose logs --tail=30 2>&1 | grep "session-watcher"'
+# Plugin activity (onboarding-hook)
+ssh root@135.181.93.227 'cd /root/don-claudio-bot/docker && docker compose logs --tail=30 2>&1 | grep "onboarding-hook"'
 
-# Check a specific user's routing (is their session on the right agent?)
-ssh root@135.181.93.227 'docker exec don-claudio-bot cat /home/node/.openclaw/agents/welcome/sessions/sessions.json'
-
-# Is the deployed code actually current? (Pattern 17: build cache)
-ssh root@135.181.93.227 'docker exec don-claudio-bot head -5 /app/onboarding/dist/services/session-watcher.js'
+# Verify plugin is loaded
+ssh root@135.181.93.227 'docker exec don-claudio-bot npx openclaw plugins list 2>/dev/null | grep onboarding'
 
 # Full container restart (clears all in-memory state)
 ssh root@135.181.93.227 'cd /root/don-claudio-bot/docker && docker compose restart'
@@ -269,15 +259,15 @@ DonClaudioBot/
 ├── ARCHITECTURE_REPORT.md          # This file
 │
 ├── onboarding/src/
-│   ├── index.ts                    # Express server + session watcher startup
+│   ├── index.ts                    # Express server (webhook API)
 │   ├── routes/
 │   │   ├── webhook.ts              # POST /webhook/onboarding
 │   │   └── state.ts                # GET /state, POST /update, /handover
 │   ├── services/
-│   │   ├── session-watcher.ts      # Polls sessions.json, triggers createAgent()
 │   │   ├── agent-creator.ts        # Creates agent: config + workspace + sandbox
 │   │   ├── config-writer.ts        # Atomic openclaw.json updates (JSON5)
-│   │   └── state-manager.ts        # SQLite CRUD
+│   │   ├── state-manager.ts        # SQLite CRUD
+│   │   └── session-watcher.ts      # DEPRECATED: kept as rollback reference
 │   └── lib/
 │       ├── validation.ts           # Zod schemas (phone, binding with .strict())
 │       └── language-detector.ts    # Phone prefix → template language
@@ -285,6 +275,8 @@ DonClaudioBot/
 ├── config/
 │   ├── openclaw.json.template      # Base config (welcome agent, dmScope, channels)
 │   ├── phone-language-map.json     # Country code → template folder
+│   ├── extensions/
+│   │   └── onboarding-hook/        # message_received plugin (auto-onboarding)
 │   └── agents/
 │       ├── welcome/AGENTS.md       # Multilingual greeting, zero personal data
 │       ├── dedicated-en/           # English "Mr Botly" (AGENTS.md, SOUL.md, MEMORY.md)
@@ -334,7 +326,7 @@ Each row is a design that failed and the pivot that replaced it. Read this to av
 | 2 | **LLM-driven onboarding agent** | Unpredictable, slow, fragile. Agent forgot steps, asked wrong questions, got stuck in loops. | **Deterministic Node.js service** with SQLite state. No LLM in the onboarding path. |
 | 3 | **No default agent** (drop first message) | Users texted the bot and got silence. Confused, they stopped trying. Terrible UX. | **Welcome Agent** (zero personal data, multilingual). Immediate response while dedicated agent is created. |
 | 4 | **Catch-all "onboarding" agent** with `default: true` | Sticky sessions trapped users. Once routed to onboarding agent, they stayed there even after dedicated agent was created. Sessions persist until `/new`, `/reset`, or 4am. | **Welcome Agent + Session Watcher.** Welcome agent has no personal data (safe if stuck). Session watcher auto-creates dedicated agent + SIGUSR1→Launcher IPC restarts Gateway. |
-| 5 | **Baileys sidecar** to detect new users | WhatsApp allows only ONE WebSocket per phone. Baileys sidecar and Gateway fought for the connection — infinite reconnect loop, messages silently dropped. | **Session watcher** polls `sessions.json` every 5s. No second WebSocket needed. |
+| 5 | **Baileys sidecar** to detect new users | WhatsApp allows only ONE WebSocket per phone. Baileys sidecar and Gateway fought for the connection — infinite reconnect loop, messages silently dropped. | **Session watcher** → then **`message_received` plugin** (Phase 12). Plugin fires instantly, ~35 lines, no polling. |
 | 6 | **Hot reload for new bindings** (trust `fs.watch()`) | OpenClaw logs "config change applied" but `monitorWebChannel` captures config in a closure at startup. New bindings are invisible. We trusted the log message for hours. | **SIGUSR1→Launcher IPC Gateway restart** after each agent creation. Session watcher sends SIGUSR1 to launcher (parent PID), launcher SIGTERM→respawns gateway within 2s. Counter resets to 0 on intentional restart. |
 | 7 | **`GOG_CONFIG_DIR` env var** for OAuth token isolation | This env var doesn't exist in gogcli. 3 days of circular debugging. gog uses Go's `os.UserConfigDir()` which only respects `XDG_CONFIG_HOME`. | **`XDG_CONFIG_HOME=/workspace/.gog-config`** — properly isolates each agent's OAuth tokens. |
 | 8 | **Read-only bind mount** for shared OAuth credentials | "Poison pill" — when agents forgot `--client` flag, gog found the read-only file at default path and failed with cryptic error. | **Copy credentials via `setupCommand`**, set as default client. Agents run `gog auth add <email>` with zero flags. Fail-safe > agent memory. |

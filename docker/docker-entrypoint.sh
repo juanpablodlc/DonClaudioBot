@@ -26,7 +26,8 @@ else
     echo "[entrypoint] Config exists: $CONFIG_PATH"
 
     # Ensure dmScope is set (volumes created before this setting exist without it)
-    if grep '"dmScope"[[:space:]]*:[[:space:]]*"per-channel-peer"' "$CONFIG_PATH" > /dev/null 2>&1; then
+    # Use node+JSON5 for checks — grep fails on JSON5 unquoted keys (Pattern 24)
+    if node -e "const JSON5=require('json5'),fs=require('fs');const c=JSON5.parse(fs.readFileSync('$CONFIG_PATH','utf-8'));process.exit(c.session?.dmScope==='per-channel-peer'?0:1)"; then
         echo "[entrypoint] Config verified: dmScope=per-channel-peer ✓"
     else
         echo "[entrypoint] Setting session.dmScope=per-channel-peer (required for multi-user session isolation)..."
@@ -44,22 +45,35 @@ else
         echo "[entrypoint] dmScope set ✓"
     fi
 
-    # Migrate: add welcome agent if missing from existing config
-    if ! grep -q '"welcome"' "$CONFIG_PATH"; then
-        echo "[entrypoint] Adding welcome agent to existing config..."
-        node -e "
-            const JSON5 = require('json5');
-            const fs = require('fs');
-            const p = '$CONFIG_PATH';
-            const config = JSON5.parse(fs.readFileSync(p, 'utf-8'));
+    # Migrate: ensure exactly one welcome agent exists (deduplicate if needed)
+    # Uses node+JSON5 — grep fails on JSON5 unquoted keys (Pattern 24)
+    node -e "
+        const JSON5 = require('json5');
+        const fs = require('fs');
+        const p = '$CONFIG_PATH';
+        const config = JSON5.parse(fs.readFileSync(p, 'utf-8'));
+        const hasWelcome = config.agents.list.some(a => a.id === 'welcome');
+        if (!hasWelcome) {
             config.agents.list.unshift({ id: 'welcome', name: 'Welcome Agent', default: true, workspace: '~/.openclaw/workspace-welcome' });
             config.agents.list.forEach((a, i) => { if (i > 0) delete a.default; });
             fs.writeFileSync(p, JSON5.stringify(config, null, 2));
-        "
-        echo "[entrypoint] Welcome agent added to config"
-    else
-        echo "[entrypoint] Welcome agent already in config ✓"
-    fi
+            console.log('[entrypoint] Welcome agent added to config');
+        } else {
+            // Deduplicate: keep first welcome, remove extras
+            const seen = new Set();
+            const before = config.agents.list.length;
+            config.agents.list = config.agents.list.filter(a => {
+                if (a.id === 'welcome') { if (seen.has('welcome')) return false; seen.add('welcome'); }
+                return true;
+            });
+            if (config.agents.list.length < before) {
+                fs.writeFileSync(p, JSON5.stringify(config, null, 2));
+                console.log('[entrypoint] Deduplicated welcome agent (' + (before - config.agents.list.length) + ' duplicates removed)');
+            } else {
+                console.log('[entrypoint] Welcome agent already in config ✓');
+            }
+        }
+    "
 fi
 
 # Ensure welcome agent workspace and directories exist
@@ -77,6 +91,15 @@ if [ -f /app/config/agents/welcome/AGENTS.md ]; then
     echo "[entrypoint] Welcome agent workspace ready: $WELCOME_WORKSPACE"
 else
     echo "[entrypoint] WARNING: Welcome agent template not found at /app/config/agents/welcome/AGENTS.md"
+fi
+
+# Install onboarding-hook plugin (volume overrides image layer, so copy at runtime)
+if [ ! -f "/home/node/.openclaw/extensions/onboarding-hook/openclaw.plugin.json" ]; then
+  mkdir -p /home/node/.openclaw/extensions/onboarding-hook
+  cp /app/config/extensions/onboarding-hook/* /home/node/.openclaw/extensions/onboarding-hook/
+  echo "[entrypoint] Installed onboarding-hook plugin"
+else
+  echo "[entrypoint] onboarding-hook plugin already installed"
 fi
 
 echo "[entrypoint] Starting OpenClaw Gateway + Onboarding Service..."

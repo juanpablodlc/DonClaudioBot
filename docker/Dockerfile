@@ -36,6 +36,7 @@ RUN npm run build
 # Copy launcher and config
 COPY launcher.js ./
 COPY config ./config
+COPY config/extensions /app/config/extensions
 
 # Copy entrypoint script
 COPY docker/docker-entrypoint.sh ./docker-entrypoint.sh

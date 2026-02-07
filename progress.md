@@ -1,5 +1,45 @@
 # Progress Log
 
+## Session: 2026-02-07 (Phase 12 COMPLETE — message_received Plugin Replaces Session Watcher)
+
+**Timeline of events:**
+1. Created `config/extensions/onboarding-hook/index.ts` (~35 lines) — `message_received` plugin with in-memory `knownPhones` cache, calls existing webhook for unknown phones
+2. Created `config/extensions/onboarding-hook/openclaw.plugin.json` — minimal manifest
+3. Added `COPY config/extensions /app/config/extensions` to Dockerfile
+4. Added plugin install block to `docker-entrypoint.sh` (copies from image to volume on first run)
+5. Removed `startSessionWatcher()` import and call from `onboarding/src/index.ts`
+6. `npm run build` — clean compilation
+7. **Deploy attempt 1 FAILED:** `npm ci` lock file out of sync (openclaw 2026.2.6 bump from prior commit brought new transitive deps). Fixed: `rm -rf node_modules && npm install --legacy-peer-deps`
+8. **Deploy attempt 2:** Bypassed build.sh (uses `npm ci`), deployed via rsync + docker compose on server. Docker build succeeded (uses `npm install --legacy-peer-deps`).
+9. **Verification:** Health OK, plugin `loaded`, session watcher NOT running, WhatsApp connected
+10. **Bonus fix:** Welcome agent duplication bug (Pattern 65) — 8 duplicates found and removed. Root cause: entrypoint `grep -q '"welcome"'` fails on JSON5 unquoted keys. Replaced both grep checks with `node -e` + JSON5.parse().
+11. Redeployed with entrypoint fix — welcome agent count: 1, dmScope check works correctly
+12. Cleaned up test plugin from previous session (`message-test`)
+13. Updated ARCHITECTURE_REPORT.md (sections 3, 4, 5, 7, 8, 10, 12) and progress.md
+
+**Files created:**
+- `config/extensions/onboarding-hook/index.ts` (35 lines)
+- `config/extensions/onboarding-hook/openclaw.plugin.json` (1 line)
+
+**Files modified:**
+- `docker/Dockerfile` — Added COPY for extensions
+- `docker/docker-entrypoint.sh` — Plugin install block + grep→JSON5 fixes + welcome dedup
+- `onboarding/src/index.ts` — Removed session watcher import/call
+- `package-lock.json` — Synced with openclaw 2026.2.6
+- `ARCHITECTURE_REPORT.md` — Updated to reflect plugin architecture (v2.16.0)
+
+**Files NOT deleted (rollback reference):**
+- `onboarding/src/services/session-watcher.ts` — Kept until Phase 12 verified in production
+
+**Verification results:**
+- Plugin loaded: `npx openclaw plugins list | grep onboarding` → `loaded`
+- Session watcher absent: no `[session-watcher]` in logs
+- Welcome agent: deduplicated from 9 → 1
+- Health: `{"status":"ok"}`
+- WhatsApp: `Listening for personal WhatsApp inbound messages`
+
+---
+
 ## Session: 2026-02-06 (Gateway Restart IPC Fix + dmScope Fix + Production Log Analysis)
 
 **Timeline of events:**

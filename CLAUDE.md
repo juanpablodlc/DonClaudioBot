@@ -2,7 +2,7 @@
 
 DonClaudioBot is a WhatsApp-based multi-user AI assistant service. Each user gets a sandboxed agent with Google OAuth (Gmail/Calendar). This is v2 — a complete redesign of Clawd4All that fixes the timing problem where OAuth happened before sandbox creation.
 
-The key architectural fix: create agents with sandbox config FIRST, then do OAuth in that agent's context. OpenClaw is used as an npm dependency (not fork), and agents are created dynamically (no pre-provisioning). Onboarding is a deterministic Node.js service with some solution like SQLite (TBC), not solely LLM-driven instructions.
+The key architectural fix: create agents with sandbox config FIRST, then do OAuth in that agent's context. OpenClaw is used as an npm dependency (not fork), and agents are created dynamically (no pre-provisioning). Onboarding uses SQLite for state + a `message_received` plugin (event-driven, Phase 12) to detect new users and trigger webhook-based agent creation.
 
 Deployment to Hetzner uses Docker with persistent volumes — so WhatsApp authentication survives code updates. The `.openclaw-reference/` folder contains OpenClaw source for docs only (gitignored). See ARCHITECTURE_REPORT.md sections 1-3 for v1 post-mortem and v2 architecture decisions. Use the QDM skill MCP below to always refer to the openclaw reference. 
 
@@ -47,8 +47,12 @@ onboarding/src/
 config/
 ├── openclaw.json.template  # OpenClaw config template
 ├── agents/
-│   ├── onboarding/        # Onboarding agent templates (AGENTS.md, SOUL.md, MEMORY.md)
-│   └── dedicated/         # Dedicated agent templates (same files)
+│   ├── welcome/           # Welcome agent templates (AGENTS.md, SOUL.md, MEMORY.md)
+│   ├── dedicated-en/      # English agent templates
+│   └── dedicated-es/      # Spanish agent templates
+├── extensions/
+│   └── onboarding-hook/   # message_received plugin (auto-detects new users, Phase 12)
+├── phone-language-map.json # Phone prefix → language routing (Phase 10)
 └── sandbox/
     └── Dockerfile.sandbox # Sandbox image with gog CLI for Google OAuth
 
@@ -71,6 +75,8 @@ scripts/
 **Isolation:** Each agent has unique `GOG_KEYRING_PASSWORD` and token path. Never share `agentDir`. See ARCHITECTURE_REPORT.md section 7.
 
 **Paths:** Host path mounts to container `/home/node/.openclaw/` (non-root user). See `docker/docker-compose.yml` lines 13-19.
+
+**Gateway restarts:** Only needed when bindings change (new user onboarding). Plugin detects new users in real-time. PR #11372 submitted to openclaw/openclaw will eliminate even these restarts by making bindings dynamically reloadable.
 
 ---
 
@@ -187,3 +193,11 @@ docker exec -it don-claudio-bot npx openclaw channels login
 5.  **UPDATE:**
     * If and **ONLY IF** verification passes: Update `IMPLEMENTATION_PLAN.json` status to `completed`.
     * If failed: Document the failure in the JSON or request a retry. update 'lessons.md' with the pattern if applicable
+
+---
+
+## Project Status
+
+**Phases 0–12:** Production. All core features implemented and verified.
+- Phase 12: Session watcher replaced with `message_received` plugin (event-driven auto-onboarding, ~50 lines)
+- Phase 13: PR #11372 submitted to openclaw/openclaw for bindings hot-reload fix (eliminates gateway restarts for new user onboarding)

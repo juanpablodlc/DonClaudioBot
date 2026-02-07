@@ -17,7 +17,8 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: Which phase you're currently working on (e.g., "Phase 1", "Phase 3").
   WHY: Quick reference for where you are in the task. Update this as you progress.
 -->
-**Phase 12: PENDING** — Replace Session Watcher with `message_received` Plugin (see findings.md Patterns 66-73)
+**Phase 12: COMPLETE** — Replace Session Watcher with `message_received` Plugin (see findings.md Patterns 66-73)
+**Phase 13: COMPLETE** — OpenClaw PR submitted: https://github.com/openclaw/openclaw/pull/11372
 
 ## Phases
 <!--
@@ -892,7 +893,7 @@ Rollback is safe: both session watcher and plugin call the same idempotent webho
 - **`knownPhones` cache lost on gateway restart** — rebuilt lazily, worst case one extra webhook call per user (returns "existing")
 - **Welcome Agent duplication** (Pattern 65) — separate fix, not this phase
 
-**Status:** pending
+**Status:** **COMPLETE** (2026-02-07) — Session watcher replaced by `message_received` plugin in production. 6 users onboarded via Welcome Agent + plugin-driven flow.
 
 ---
 
@@ -996,7 +997,7 @@ const route = resolveAgentRoute({ cfg: loadConfig(), channel: "whatsapp", ... })
 
 DeepWiki (2026-02-07) claims "bindings related to channels should be picked up without restart" — **THIS IS WRONG**. It confuses channel-level hot-reload (which exists for channel config like `channels.whatsapp.allowFrom`) with bindings-level hot-reload (which doesn't work because `bindings` is `kind: "none"`). Do not trust DeepWiki on this specific topic. Trust the source code.
 
-**Status:** pending
+**Status:** **COMPLETE** (2026-02-07) — PR #11372 submitted to openclaw/openclaw. Fixes #6602 (bindings ignored). 4 files changed across WhatsApp/Telegram/Discord channels. All 6510 tests pass. Awaiting maintainer review.
 
 ---
 

@@ -91,13 +91,13 @@
 **Prevention:** Document .env location in DEPLOYMENT.md or use absolute `env_file` path
 
 ### Pattern 2: Template Changes Don't Apply to Existing Volumes
-**Symptom:** Template changes (like adding `model.primary`) don't appear in running config
-**Root Cause:** Docker volumes persist data; template is only used on FIRST volume init
+**Symptom:** Template changes (like adding `model.primary`) don't appear in running config. Removed onboarding agent from template, but live config still has it.
+**Root Cause:** Docker volumes persist data; template is only used on FIRST volume init. The live `openclaw.json` in `don-claudio-state` volume is never automatically updated.
 **Our Setup:**
-- Template: `config/openclaw.json.template` (has `model.primary`)
-- Volume config: `/home/node/.openclaw/openclaw.json` (stale, no `model.primary`)
-**Fix:** Use `openclaw config set` to update existing config OR destroy volume
-**Prevention:** Document that template changes require manual config update OR fresh volume
+- Template: `config/openclaw.json.template` (has updates)
+- Volume config: `/home/node/.openclaw/openclaw.json` (stale, misses updates)
+**Fix:** Use `openclaw config set` to update existing config OR destroy volume for fresh init. For significant config migrations, use Node.js scripts with `json5` package inside the container.
+**Prevention:** Every template change needs a corresponding "migration" step for live systems. Document live config changes alongside template changes. Consider a deploy-time reconciliation script.
 
 ### Pattern 3: Container Restart Doesn't Pick Up New Image
 **Symptom:** Container still runs old image after `deploy.sh`
@@ -265,10 +265,10 @@ To:
 **Root Cause:** Sandbox config has `workspaceAccess: 'ro'` (read-only) which mounts workspace as read-only in sandbox. This prevents:
   - Agents from writing to memory files
   - Users from editing their agent configuration
-**Current Config:** `workspaceAccess: 'ro'` in agent-creator.ts:69
-**Fix Needed:** Change to `workspaceAccess: 'rw'` OR separate read-only instructions from writeable memory. Research OpenClaw's memory write patterns to understand the security implications.
-**Trade-off:** Read-write workspace allows user customization and agent memory writes, but potentially allows compromised agents to modify their own instructions (security consideration for untrusted AI).
-**Prevention:** When setting sandbox permissions, consider whether users should be able to modify their agent's behavior. If yes, workspace must be writeable. If no, keep read-only and use alternative memory storage.
+**OpenClaw Memory Flush Behavior:** Memory flush (auto-writing to MEMORY.md and memory/YYYY-MM-DD.md) is SKIPPED when `workspaceAccess: 'ro'` or `'none'`. From memory.md docs: "Workspace must be writable."
+**Fix Applied:** Changed `workspaceAccess: 'ro'` → `'rw'` in agent-creator.ts
+**Trade-off:** Read-write workspace allows user customization and agent memory writes, but potentially allows compromised agents to modify their own instructions (security consideration for untrusted AI). For user-owned dedicated agents, this is acceptable since users can already edit files via host access.
+**Prevention:** When setting sandbox permissions, explicitly decide: (a) Read-only instructions + separate memory storage (complex), or (b) Writeable workspace with user trust (simple, Clawd4All v1 approach).
 
 ### Pattern 26: Missing User Data - No Onboarding Conversation
 **Symptom:** Agents created with only phone number - no name, email, or user preferences collected
@@ -280,33 +280,6 @@ To:
 
 ---
 
-### Pattern 48: OpenClaw Sandbox Docker Env Vars Not Passed to Container (Critical Bug)
-**Symptom:** `docker inspect` of sandbox container shows ZERO custom env vars — only default Node.js image vars (PATH, NODE_VERSION, YARN_VERSION). Config has `agents.list[].sandbox.docker.env` with GOG_KEYRING_PASSWORD, GOG_CONFIG_DIR, GOG_KEYRING_BACKEND, but sandbox doesn't receive them.
-**Root Cause:** OpenClaw 2026.1.30 has a bug in `buildSandboxCreateArgs()` (src/agents/sandbox/docker.ts:106-168). The function processes many docker options (network, user, capDrop, tmpfs, binds, ulimits, etc.) but completely misses `params.cfg.env`. The env vars are defined in the SandboxDockerConfig type but never passed to the docker create command.
-**Evidence:**
-  - Agent config shows: `env: { GOG_KEYRING_PASSWORD: "...", GOG_CONFIG_DIR: "...", GOG_KEYRING_BACKEND: "file" }`
-  - `docker inspect sandbox` shows: only default PATH, NODE_VERSION, YARN_VERSION (no GOG_* vars)
-  - `gog auth status` inside sandbox shows: `keyring_backend: auto` (should be `file`) and `config_path: /root/.config/gogcli` (should use GOG_CONFIG_DIR)
-**Fix (Workaround):** Set env vars via `setupCommand` in /root/.profile so they persist for all docker exec commands:
-  ```bash
-  setupCommand: `cat >> /root/.profile << 'EOF'
-  export GOG_KEYRING_PASSWORD="..."
-  export GOG_CONFIG_DIR="/home/node/.openclaw/agents/${agentId}/agent/.gog"
-  export GOG_KEYRING_BACKEND="file"
-  EOF
-  mkdir -p "${GOG_CONFIG_DIR}"
-  `
-  ```
-**Consideration:** This is a temporary workaround. The proper fix is to patch OpenClaw's buildSandboxCreateArgs() to add:
-  ```typescript
-  if (params.cfg.env) {
-    for (const [key, value] of Object.entries(params.cfg.env)) {
-      args.push("-e", `${key}=${value}`);
-    }
-  }
-  ```
-**Prevention:** When using OpenClaw sandbox docker.env, verify env vars are actually present in running containers with `docker inspect <container> | grep -A 20 '"Env"'`. If missing, use setupCommand workaround or bake env vars into custom sandbox image.
-**Related:** Pattern 32 (gog hardcodes credentials path), Pattern 33 (sandbox binds use host paths)
 
 ---
 
@@ -407,13 +380,6 @@ To:
 **Trade-off:** Silent failure means admins might not notice templates are missing until agents behave with default personality.
 **Prevention:** When implementing optional file operations (templates, configs), consider whether failure should be (a) silent (feature is optional), (b) warning (feature is nice-to-have), or (c) error (feature is critical).
 
-### Pattern 29: Memory Write Requires workspaceAccess 'rw'
-**Discovery:** OpenClaw memory flush (auto-writing to MEMORY.md and memory/YYYY-MM-DD.md) is SKIPPED when `workspaceAccess: 'ro'` or `'none'`.
-**Root Cause:** From memory.md docs: "Workspace must be writable: if the session runs sandboxed with `workspaceAccess: \"ro\"` or `\"none\"`, the flush is skipped."
-**Fix:** Changed `workspaceAccess: 'ro'` → `'rw'` in agent-creator.ts
-**Security Consideration:** `'rw'` allows agents to modify their own AGENTS.md/SOUL.md files. This is acceptable for user-owned dedicated agents (users can already edit files via host access).
-**Prevention:** When designing agent workspaces, decide: (a) Read-only instructions + separate memory storage (complex), or (b) Writeable workspace with user trust (simple, Clawd4All v1 approach).
-
 ### Pattern 30: OpenClaw Gateway Works With Empty agents.list
 **Discovery:** Gateway does NOT require any agents to start. The absolute minimum config is `{ agent: { workspace: "..." }, channels: { whatsapp: { allowFrom: [...] } } }`.
 **Our Setup:** After removing the onboarding agent, `agents.list: []` and `bindings: []`. The `channels.whatsapp` section is still present and configures the channel.
@@ -472,12 +438,6 @@ To:
 **Evidence:** Status showed "OK, linked, auth 11h ago" while the last Gateway WhatsApp log was from 6 hours prior with no incoming messages processed.
 **Prevention:** Don't trust `openclaw status` for real-time connection health. Verify by checking Gateway logs for recent `[whatsapp] Listening for personal WhatsApp inbound messages` entries. If the last one is hours old, the connection is likely dead.
 
-### Pattern 39: Live Config Requires Manual Cleanup (Template ≠ Volume, Again)
-**Symptom:** Removed onboarding agent from template in Phase 10, but live config on server still has the onboarding agent with `default: true` and its catch-all binding.
-**Root Cause:** Pattern #2 revisited — template changes don't apply to existing volumes. The template was updated but the live `openclaw.json` in the `don-claudio-state` volume was never cleaned up.
-**Fix:** Used Node.js script with `json5` package inside the container to clear `agents.list` and `bindings` arrays. Also cleaned up SQLite test rows, workspace directories, and agent state dirs.
-**Prevention:** Every template change needs a corresponding "migration" step for live systems. Document live config changes alongside template changes. Consider a deploy-time reconciliation script.
-
 ### Pattern 40: OpenClaw Config is JSON5 — Cannot Use JSON.parse()
 **Symptom:** `SyntaxError: Expected property name or '}' in JSON at position 4` when reading `openclaw.json` with `JSON.parse()`.
 **Root Cause:** OpenClaw config uses JSON5 format (unquoted keys, trailing commas). Standard `JSON.parse()` rejects this.
@@ -498,11 +458,11 @@ To:
 **Fix:** Set `DOCKER_API_VERSION=1.44` environment variable in docker-compose.yml. This overrides the client's default API version.
 **Prevention:** When running Docker-in-Docker (socket mount), check host daemon's minimum API version (`docker version --format '{{.Server.MinAPIVersion}}'`) and set `DOCKER_API_VERSION` accordingly.
 
-### Pattern 43: OpenClaw Hooks — No `message:received` Event Yet
-**Symptom:** Need to detect incoming messages from unknown users to trigger onboarding, but no hook event exists for this.
-**Root Cause:** OpenClaw hooks support `command:new`, `command:reset`, `command:stop`, `agent:bootstrap`, `gateway:startup`. The `message:received` and `session:start` events are listed as **"Future Events"** in the docs — planned but not yet implemented (as of v2026.1.30).
-**Implication:** Cannot use hooks to detect unknown users messaging for the first time. The Baileys sidecar was the workaround, but it's broken (Pattern #37). Need alternative: default agent with `agent:bootstrap` hook, or manual webhook trigger.
-**Prevention:** Always check if an event type is under "Future Events" in the docs before building around it.
+### Pattern 43: OpenClaw Hooks — OUTDATED (See Pattern 66)
+**STATUS:** This pattern is OUTDATED. Initially believed `message:received` was a "Future Event", but Pattern 66 (2026-02-07) discovered it IS implemented via plugin hooks (not internal hooks). See Pattern 66 for correct information.
+**Previous assumption:** `message:received` not yet implemented
+**Correct status:** Implemented and working in OpenClaw 2026.1.30 (confirmed via plugin test)
+**Prevention:** Distinguish between internal hooks (HOOK.md — limited event types) and plugin hooks (api.on() — rich event types including `message_received`).
 
 ### Pattern 44: Env Vars Not in .env Are Silently Defaulted
 **Symptom:** `BAILEYS_SIDECAR_ENABLED` was never in the `.env` file but showed as `true` in the container.
@@ -641,203 +601,53 @@ To:
 - **Hetzner Server:** root@135.181.93.227 (SSH key: ~/.ssh/hetzner)
 - **OpenClaw Docs:** .openclaw-reference/ (search via `mcp__qmd__search` or `mcp__qmd__vsearch`)
 
-### Pattern 60: OpenClaw Bindings Need Gateway Restart (Config Closure Bug)
-**Symptom:** New binding written to `openclaw.json`, Gateway logs "config change applied (dynamic reads: bindings)", but messages keep routing to the old/default agent. Only a full Gateway restart fixes routing.
-**Root Cause:** Three-layer bug in OpenClaw's config reload system:
-1. `config-reload.ts:72` classifies `bindings` as `kind: "none"` (no-op) — assumes bindings are read dynamically per-message
-2. `monitor.ts:65` calls `loadConfig()` ONCE at startup and captures the config object in a closure
-3. `on-message.ts:66` uses `params.cfg` (the stale closure snapshot) for `resolveAgentRoute()`, never re-reading from disk
-**Evidence:** `loadConfig()` in `io.ts` has a 200ms TTL cache — designed for dynamic reads. But `monitorWebChannel` never calls it again after startup. The `createWebOnMessageHandler({ cfg, ... })` call at `monitor.ts:160` passes the startup config into the handler's closure permanently.
-**The "none" classification:** `config-reload.ts` BASE_RELOAD_RULES_TAIL has `{ prefix: "bindings", kind: "none" }`. "none" means "this section is read dynamically, no reload action needed." This is wrong for bindings — they're cached in the monitor closure.
-**Fix:** After creating a new agent binding, session watcher sends SIGUSR1 to launcher (`process.kill(process.ppid, 'SIGUSR1')`). Launcher sets `intentionalGatewayRestart=true` and sends SIGTERM to gateway. On exit, launcher detects the flag, resets restart counter to 0, and respawns gateway. The fresh Gateway calls `monitorWebChannel` → `loadConfig()` → picks up new bindings. (Originally used SIGUSR2 directly to gateway, but `npx` wrapper didn't propagate signals — see Pattern 62.)
-**Files involved:**
-- `.openclaw-reference/src/gateway/config-reload.ts:72` — The "none" rule
-- `.openclaw-reference/src/web/auto-reply/monitor.ts:65,160` — Config captured in closure
-- `.openclaw-reference/src/web/auto-reply/monitor/on-message.ts:66` — Uses stale `params.cfg`
-- `onboarding/src/services/session-watcher.ts` — Sends SIGUSR1 to launcher after agent creation
-- `launcher.js` — SIGUSR1 handler, intentional restart flag, auto-restarts gateway
-**Prevention:** When integrating with OpenClaw's config system, test that changes are actually picked up at runtime — don't trust the "config change applied" log message. For bindings specifically, always restart the Gateway.
-
-### Pattern 61: Launcher Restart Counter Must Reset for Intentional Restarts
-**Symptom:** After 3 new users onboard, launcher gives up restarting gateway ("exceeded max restarts")
-**Root Cause:** Each agent creation triggers a SIGUSR1→SIGTERM gateway restart cycle. Launcher's `MAX_RESTARTS=3` counter increments on each restart. After 3 users, counter hits max and launcher shuts down everything.
-**Fix:** Launcher uses `intentionalGatewayRestart` flag — set to true on SIGUSR1, checked in exit handler. When flag is set, counter resets to 0 immediately (not after 30s uptime). This allows unlimited intentional restarts while still protecting against crash loops.
-**Prevention:** When using process managers with restart limits, distinguish between crash restarts (rapid exit) and intentional restarts (signaled by parent/sibling).
-
-### Pattern 62: npx Wrapper Doesn't Propagate Signals to Child Process
-**Symptom:** `pkill -KILL -f "openclaw gateway"` kills the npx wrapper but leaves the actual gateway child alive, holding port 18789 and the PID lock. New gateway can't start, burns through MAX_RESTARTS, container crashes.
-**Root Cause:** `npx openclaw gateway` spawns a wrapper process that spawns the actual gateway as a child. SIGTERM/SIGKILL to the wrapper doesn't propagate to the child. The child becomes an orphan still bound to the port.
-**Fix:** Run gateway directly: `node node_modules/openclaw/openclaw.mjs gateway` — single process, `proc.kill('SIGTERM')` directly controls it. No orphaned children.
-**Prevention:** Never use `npx` for long-running processes that need signal handling. Use direct `node` invocation. `node_modules/.bin/openclaw` is just a symlink to `../openclaw/openclaw.mjs`.
-
-### Pattern 63: dmScope Belongs Under `session`, Not `gateway`
-**Symptom:** Gateway crashes with `Invalid config: Unrecognized key: "dmScope"` after setting `gateway.dmScope`.
-**Root Cause:** OpenClaw strict schema rejects unknown keys under `gateway`. The `dmScope` setting lives under `session` (see `config/openclaw.json.template:28-30`).
-**Fix:** Use `session.dmScope: 'per-channel-peer'`. Updated entrypoint to set correct path and clean up mistaken `gateway.dmScope` if present.
-**Prevention:** Always check the template for correct config key paths before using `openclaw config set` or writing migration scripts.
-
-### Pattern 64: In-Flight Messages Dropped During Gateway Restart
-**Symptom:** User +56923777467 sent a message at 17:15:39, got no reply. Gateway was restarted 2 seconds later for another user's onboarding.
-**Root Cause:** SIGTERM kills the Gateway process immediately, including any in-flight LLM requests. There's no graceful drain — the request is simply lost. No retry mechanism exists.
-**Impact:** Every gateway restart (for new user onboarding) creates a ~2-5 second window where active conversations can lose messages silently.
-**Mitigation (not yet implemented):** Consider queuing/batching gateway restarts, or adding a drain period before SIGTERM.
-**Prevention:** Be aware that gateway restarts have a blast radius beyond the new user being onboarded. Monitor for "orphaned user message" warnings in logs.
-
-### Pattern 65: Welcome Agent Duplication From Entrypoint grep on JSON5
-**Symptom:** 8 copies of welcome agent in `openclaw.json` agents.list after multiple container restarts.
-**Root Cause:** Entrypoint uses `grep -q '"welcome"'` to check if welcome agent exists. OpenClaw config is JSON5 (unquoted keys), so `grep '"welcome"'` (looking for double-quoted string) may fail depending on how JSON5.stringify() formats the output. Each failure causes welcome agent to be prepended again.
-**Fix needed:** Replace `grep -q '"welcome"'` with `node -e` using JSON5.parse() to check if any agent has `id === 'welcome'`.
-**Prevention:** Never use grep/sed on JSON5 files. Always use `node -e` with the `json5` package for config inspection.
 
 ---
 
-## Phase 12 Research: `message_received` Plugin Hook (2026-02-07)
+## Known OpenClaw Upstream Bugs & Workarounds
 
-### Pattern 66: `message_received` Plugin Hook IS Implemented (Docs Mislabel It)
-**Symptom:** ARCHITECTURE_REPORT.md and Pattern 43 say `message:received` is a "Future Event" and not yet implemented.
-**Root Cause:** There are TWO separate hook systems in OpenClaw:
-  1. **Internal hooks** (HOOK.md files): Only support `command`, `session`, `agent`, `gateway` events. The "Future Events" label refers to THIS system.
-  2. **Plugin hooks** (api.on()): Support `message_received`, `message_sent`, `before_agent_start`, `agent_end`, etc. These ARE implemented and live.
-**Evidence:**
-  - `.openclaw-reference/src/auto-reply/reply/dispatch-from-config.ts:137-183` — `message_received` fired via `hookRunner.runMessageReceived()` with full metadata (senderE164, senderId, senderName, content, timestamp)
-  - `.openclaw-reference/src/plugins/types.ts:480-488` — Handler type: `(event: PluginHookMessageReceivedEvent, ctx: PluginHookMessageContext) => Promise<void> | void`
-  - `.openclaw-reference/src/hooks/internal-hooks.ts:11` — Internal hooks only: `"command" | "session" | "agent" | "gateway"` (no message_received)
-  - **Live test on server (2026-02-07):** Plugin created at `~/.openclaw/extensions/message-test/`, gateway restarted, message sent → `/tmp/message-received.log` confirmed: `from=+13128749154 e164=+13128749154 channel=whatsapp content=Hello!`
-**Status:** `message_received` is LIVE and WORKING in OpenClaw 2026.1.30.
-**Prevention:** Don't confuse "internal hooks" (HOOK.md) with "plugin hooks" (api.on). They are completely separate systems with different event types.
+### Bug #1: Sandbox Docker Env Vars Not Injected
+**Severity:** Medium | **Status:** Open, no upstream fix yet
+**Description:** `agents.list[].sandbox.docker.env` config is ignored. OpenClaw's `buildSandboxCreateArgs()` skips processing env vars.
+**GitHub:** No issue filed yet (discovered via code review)
+**Workaround:** Use `setupCommand` to write env vars to `/root/.profile` (persists for all docker exec calls)
+**Our Implementation:** onboarding/src/services/agent-creator.ts
 
-### Pattern 67: Plugin Hooks Cannot Modify Routing (Observe-Only)
-**Symptom:** Hope that `message_received` could reroute messages to a different agent (bypassing bindings).
-**Root Cause:** The `message_received` hook returns `void`. There is no `ctx.routeTo()`, `event.overrideAgent`, or any mechanism to change the routing decision. The hook is fire-and-forget, observe-only.
-**Evidence (DeepWiki 2026-02-07):**
-  - `message_received` fires BEFORE `resolveAgentRoute()` — it sees the message early, but cannot influence where it goes.
-  - Handler return type is `Promise<void> | void` — no return value consumed by the routing pipeline.
-  - By contrast, `message_sending` hook CAN modify outgoing messages or cancel them. If routing override were intended for `message_received`, similar API would exist.
-**Implication:** The Welcome Agent is still required as the catch-all for first messages from unknown users. The plugin can detect the unknown user instantly, but it cannot redirect the message to the newly created dedicated agent.
-**Prevention:** Don't build architecture around plugins modifying message routing. Plugins observe; bindings route.
+### Bug #2: Bindings Hot-Reload Broken (Core Routing Bug)
+**Severity:** Critical | **Status:** Open, upstream PR #11372 pending review + PR #7747 alternative
+**Description:** New agent bindings written to `openclaw.json` don't take effect until Gateway restart. Channel monitors (WhatsApp, Telegram, Discord, Google Chat, Feishu, Matrix) capture config at startup — new bindings invisible to routing.
+**Root Cause:** `monitorWebChannel` calls `loadConfig()` ONCE at startup, captures in closure, never refreshes for routing decisions.
+**GitHub Issues:** #6602 (WhatsApp), #9351 (Telegram), #9198 (Google Chat), #10764 (Feishu), #3165 (Matrix)
+**Upstream PRs:**
+  - **#11372** (juanpablodlc, 2026-02-07): "make bindings dynamic by calling loadConfig() per-message" — Affects 5 files across 3 channels. Uses existing 200ms cache. Awaiting reviewer approval on test robustness.
+  - **#7747** (NikolasP98): Alternative "zero-latency hot-reload for agent bindings" approach
+**Our Workaround:** SIGUSR1 → Launcher IPC → SIGTERM Gateway → respawn (session-watcher.ts + launcher.js). Every new user onboarding triggers ~2-5s restart.
+**Impact:** In-flight messages dropped during restarts (no graceful drain). Affects all multi-user setups.
 
-### Pattern 68: Bindings Hot-Reload Bug STILL NOT Fixed (Even in Latest Version)
-**Symptom:** After writing a new binding to `openclaw.json`, Gateway logs "config change applied" but messages continue routing to the wrong agent.
-**Root Cause (CONFIRMED STILL PRESENT via DeepWiki 2026-02-07):**
-  1. `config-reload.ts` BASE_RELOAD_RULES_TAIL: `{ prefix: "bindings", kind: "none" }` — classifies binding changes as no-op
-  2. `monitorWebChannel` calls `loadConfig()` ONCE at startup, captures in closure
-  3. `resolveAgentRoute()` uses stale `params.cfg` from that closure
-  4. The "none" classification means the fs.watch() change detection fires, logs a message, but takes NO action
-**Current workaround:** SIGUSR1 → Launcher → SIGTERM Gateway → respawn (Pattern 60). This remains necessary.
-**Note on `gateway.reload.mode`:** Setting it to `"restart"` would auto-restart on ANY config change, but that's heavy-handed (restarts on plugin changes, model changes, etc.). The targeted SIGUSR1 approach is more surgical.
-**Prevention:** Gateway restart for new bindings is unavoidable until OpenClaw patches `config-reload.ts` to treat bindings as `kind: "restart"` or `kind: "hot"`.
+### Bug #3: Pattern 65 — JSON5 Grep Issue (OUR IMPLEMENTATION BUG, NOT UPSTREAM)
+**This is NOT an OpenClaw bug.** Our entrypoint uses `grep -q '"welcome"'` on JSON5 config (unquoted keys). Always use `node -e` with JSON5.parse() for config inspection.
 
-### Pattern 69: Plugin API Has No Config Reload, Agent Creation, or Restart Methods
-**Symptom:** Hope that a plugin could create agents, add bindings, or trigger config reload from within its own code.
-**Root Cause:** The `OpenClawPluginApi` object exposes:
-  - `api.on()` — hook registration
-  - `api.config` — read-only config access
-  - `api.registerTool()`, `api.registerHttpHandler()`, `api.registerChannel()`, `api.registerService()`, `api.registerCommand()`, `api.registerCli()`, `api.registerGatewayMethod()`
-  - `api.runtime` — core helpers (media, mentions, groups, debounce)
-  - `api.logger` — plugin-scoped logger
-  But NOT:
-  - `api.createAgent()` — doesn't exist
-  - `api.addBinding()` — doesn't exist
-  - `api.reloadConfig()` — doesn't exist
-  - `api.restart()` — doesn't exist
-**Implication:** The plugin cannot self-service agent creation. It must call the Onboarding Service's HTTP webhook (`POST /webhook/onboarding`) to trigger agent creation. The existing agent-creator.ts + config-writer.ts + SIGUSR1 restart chain stays intact.
-**Prevention:** Plugins are for observation and extension, not for core config manipulation. Always call back to the Onboarding Service for agent lifecycle operations.
+---
 
-### Pattern 70: `sessions_send` Tool Exists But Is Agent-Only (Not Plugin API)
-**Symptom:** DeepWiki mentions `sessions_send` can send messages to a specific agent by session key, bypassing binding-based routing.
-**Root Cause:** `sessions_send` is an **agent tool** (used by agents during conversations), not a plugin API method. A plugin's `message_received` handler has no way to call `sessions_send` — it would need to go through the agent RPC system.
-**Implication:** Cannot use this to forward the first message from the Welcome Agent to the newly created dedicated agent. The first message is still "lost" to the Welcome Agent (but the Welcome Agent's response is useful — it tells the user their assistant is being set up).
-**Prevention:** Agent tools and plugin APIs are separate namespaces. Don't assume one can call the other.
+## Plugin Development Reference
 
-### Pattern 71: Plugin Manifest Minimum Requirements
-**Symptom:** Plugin silently skipped (not loaded) despite correct `index.ts`.
-**Root Cause:** `loader.ts:227-228` skips plugin candidates without `openclaw.plugin.json` manifest. Without the manifest, the plugin is invisible.
-**Minimum valid manifest:**
-```json
-{"id":"message-test","configSchema":{}}
-```
-**More robust (from e2e tests):**
-```json
-{"id":"message-test","configSchema":{"type":"object","properties":{}}}
-```
-**Evidence:** Our test used the bare `{}` for configSchema and it loaded successfully (`npx openclaw plugins list` showed status: `loaded`).
-**Required fields:** `id` (non-empty string) + `configSchema` (object). Everything else optional.
-**Prevention:** Always create `openclaw.plugin.json` alongside `index.ts`. Use `npx openclaw plugins list` to verify loading.
+### Plugin API Limitations (Pattern 69)
+Plugin API (`api.on`, `api.config`, `api.registerTool`, `api.logger`, etc.) is observe/extend only. No `api.createAgent()`, `api.addBinding()`, `api.reloadConfig()`, or `api.restart()`. Agent lifecycle ops must go through the Onboarding Service webhook.
 
-### Pattern 72: Global Plugins Auto-Enable From `~/.openclaw/extensions/`
-**Symptom:** Worried that plugin needs to be registered in `openclaw.json` config.
-**Root Cause:** Plugins in `~/.openclaw/extensions/<name>/` are auto-discovered and auto-enabled by default. `resolveEnableState()` returns `{ enabled: true }` for global extensions. No `openclaw.json` changes needed.
-**Evidence:** Test plugin at `~/.openclaw/extensions/message-test/` loaded automatically after gateway restart. `npx openclaw plugins list` showed it alongside 30+ built-in plugins.
-**Entry point search order:** `index.ts` → `index.js` → `index.mjs` → `index.cjs`
-**TypeScript support:** Plugins loaded via `jiti` — TypeScript files work directly without compilation.
-**Gateway restart required:** No hot-reload for new plugins. Must restart gateway to pick up new/changed plugins.
-**Prevention:** For test plugins, just create the directory + files + restart gateway. For production plugins, include in the Docker image or volume.
+### Plugin Setup (Patterns 71-72)
+- **Manifest required:** `openclaw.plugin.json` with `{"id":"name","configSchema":{}}` — without it, plugin is silently skipped
+- **Auto-discovery:** Plugins in `~/.openclaw/extensions/<name>/` are auto-enabled. No config registration needed.
+- **Entry points:** `index.ts` → `index.js` → `index.mjs` → `index.cjs` (TypeScript works via `jiti`, no compilation)
+- **Restart required:** New/changed plugins need gateway restart
 
-### Pattern 73: `message_received` Event Data — Full Reference
-**Event object (`event`):**
+### `message_received` Event Shape (Pattern 73)
 ```typescript
-{
-  from: string,              // e.g., "+13128749154" (E.164)
-  content: string,           // message text
-  timestamp: number,         // Unix timestamp
-  metadata: {
-    senderE164: string,      // e.g., "+13128749154" (redundant with from)
-    senderId: string,        // platform-specific sender ID
-    senderName: string,      // display name (if available)
-    // ... additional platform-specific fields
-  }
-}
+// event: { from: "+1...", content: "text", timestamp: number,
+//          metadata: { senderE164, senderId, senderName } }
+// ctx:   { channelId: "whatsapp", accountId, conversationId }
+// Fires BEFORE resolveAgentRoute(). Returns void (observe-only).
 ```
-**Context object (`ctx`):**
-```typescript
-{
-  channelId: string,         // e.g., "whatsapp"
-  accountId: string,         // account identifier
-  conversationId: string     // conversation/session ID
-}
-```
-**Firing order:** BEFORE `resolveAgentRoute()` — catches ALL inbound messages regardless of which agent they route to.
-**Execution:** Fire-and-forget — errors in the hook handler are caught and logged but don't block message processing.
 
-### Pattern 74: Bindings Bug Is a 3-Line Fix — `loadConfig()` Has 200ms Cache By Design
-**Discovery:** `io.ts:532` defines `DEFAULT_CONFIG_CACHE_MS = 200`. `loadConfig()` was DESIGNED for per-request dynamic reads — it caches for 200ms then re-reads from disk. The bug is that `monitorWebChannel` (monitor.ts:65) calls it ONCE and captures the result, instead of calling it per-message for routing.
-**Fix (PR A):** Change `resolveAgentRoute({ cfg: params.cfg, ... })` to `resolveAgentRoute({ cfg: loadConfig(), ... })` in:
-  - `src/web/auto-reply/monitor/on-message.ts:66`
-  - `src/telegram/bot-message-context.ts:166`
-  - `src/telegram/bot.ts:424`
-**Impact:** Bindings become truly dynamic. No gateway restart needed. `kind: "none"` classification becomes correct.
-**Warning:** DeepWiki claims bindings are already hot-reloadable — this is WRONG. Source code proves otherwise.
-
-### Pattern 75: All Channel Monitors Share the Same Stale-Config Bug
-**Discovery:** Not just WhatsApp. Telegram (`bot.ts:117`, `bot-message-context.ts:166`) also captures `cfg = loadConfig()` once at startup and passes it to all routing calls. Discord likely same pattern (`discord/monitor/message-handler.ts`). The PR fix benefits ALL channels.
-
-### Pattern 76: Discord CONFIRMED Same Stale-Config Bug (R5 Complete)
-**Discovery (2026-02-07):** Discord channel has identical stale-config routing pattern:
-- `discord/monitor/provider.ts:133` — `const cfg = opts.config ?? loadConfig()` called once at startup
-- `discord/monitor/provider.ts:501` — `createDiscordMessageHandler({ cfg, ... })` passes stale config
-- `discord/monitor/message-handler.ts:23-40` — `params.cfg` stored in closure for all messages
-- `discord/monitor/message-handler.preflight.ts:169-178` — `resolveAgentRoute({ cfg: params.cfg, ... })` uses stale snapshot
-**Impact:** PR A fix must include Discord (`message-handler.preflight.ts:169`). Total: 4 files across 3 channels.
-
-### Pattern 77: GitHub Issues Confirm Bug Is Widely Reported
-**Discovery (2026-02-07):** Searched openclaw/openclaw GitHub issues. Found 3 directly related open issues:
-- **#6602** (2026-02-02): "Multi-agent routing bindings are ignored - messages always go to main agent" — Signal + WhatsApp, 0 comments, exact same bug
-- **#9351** (2026-02-05): "Telegram Bot Routing Broken - accountId Ignored in Bindings" — Telegram multi-account, 0 comments
-- **#10576** (2026-02-06): "feat(telegram): Support per-topic agent routing via bindings" — feature request that would benefit from this fix
-**No existing PRs found** — searched "bindings hot reload", "loadConfig routing", "config-reload bindings". Field is clear.
-**No comments or maintainer responses** on #6602 or #9351 — suggests the issue hasn't been triaged yet.
-
-### Pattern 78: PR A Is Safe — loadConfig() 200ms Cache Analyzed
-**Discovery (2026-02-07):** Full analysis of `loadConfig()` in `config/io.ts:557-579`:
-- Cache key: `configPath` (resolved once per call via `createConfigIO()`)
-- Cache TTL: `DEFAULT_CONFIG_CACHE_MS = 200` (line 532)
-- Cache bypass: `OPENCLAW_DISABLE_CONFIG_CACHE=1` or `OPENCLAW_CONFIG_CACHE_MS=0` env vars
-- Cache update: only on successful parse (stale cache survives corrupted files)
-- Thread safety: synchronous read in single-threaded Node.js, no race conditions
-- Performance: at most 5 disk reads/second under 200ms cache, JSON5 parse <1ms for typical configs
-- `writeConfigFile()` (line 585) calls `clearConfigCache()` — so writes from the same process invalidate immediately
-**Edge case:** Config written by external process (e.g., onboarding service writing via CLI) → 200ms max staleness before picked up. Acceptable vs. 2-5s restart downtime.
-**Conclusion:** PR A has no meaningful performance or safety risks.
 
 ## Visual/Browser Findings
 <!--

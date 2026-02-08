@@ -6,7 +6,7 @@ import { ZodError } from 'zod';
 import rateLimit from 'express-rate-limit';
 import { webhookAuth } from '../middleware/webhook-auth.js';
 import { OnboardingWebhookSchema } from '../lib/validation.js';
-import { getState, createState } from '../services/state-manager.js';
+import { getState, createState, setOAuthNonce } from '../services/state-manager.js';
 import { createAgent } from '../services/agent-creator.js';
 import { logAgentCreation } from '../lib/audit-logger.js';
 
@@ -46,8 +46,8 @@ router.post('/webhook/onboarding', webhookAuth, webhookRateLimiter, async (req, 
       return res.status(200).json({ status: 'existing', agentId: existing.agent_id });
     }
 
-    // Step 3: Create agent
-    const agentId = await createAgent({ phoneNumber: phone });
+    // Step 3: Create agent (returns nonce but does NOT store it — DB row doesn't exist yet)
+    const { agentId, oauthNonce } = await createAgent({ phoneNumber: phone });
     logAgentCreation(phone, agentId, true);
 
     // Step 4: Store state (with race condition handling)
@@ -71,7 +71,15 @@ router.post('/webhook/onboarding', webhookAuth, webhookRateLimiter, async (req, 
       throw dbError;
     }
 
-    // Step 5: Return success
+    // Step 5: Store OAuth nonce AFTER the DB row exists
+    // (Previously this ran inside createAgent() before createState(), so the
+    // UPDATE hit 0 rows and the nonce was silently lost)
+    if (oauthNonce) {
+      setOAuthNonce(phone, oauthNonce);
+      console.log('[webhook] OAuth nonce stored for ' + phone);
+    }
+
+    // Step 6: Return success
     return res.status(201).json({ status: 'created', agentId, phone });
   } catch (error) {
     // Handle Zod validation errors

@@ -3,6 +3,7 @@
 
 import express from 'express';
 import { initDatabase } from './services/state-manager.js';
+import { migrateNullNonces } from './services/nonce-migrator.js';
 import { router as webhookRouter } from './routes/webhook.js';
 import { router as stateRouter } from './routes/state.js';
 import { router as oauthRouter } from './routes/oauth.js';
@@ -14,6 +15,9 @@ app.use(express.json());
 
 // Initialize database before starting server
 initDatabase();
+
+// Migrate existing users with NULL nonces (one-time fix for nonce ordering bug)
+migrateNullNonces();
 
 // Health check endpoint
 app.get('/health', (req, res) => {

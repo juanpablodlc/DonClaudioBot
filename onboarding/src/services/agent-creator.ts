@@ -36,12 +36,21 @@ export interface AgentConfig {
   };
 }
 
+export interface CreateAgentResult {
+  agentId: string;
+  oauthNonce?: string;
+}
+
 /**
  * Create a new dedicated agent with transactional rollback
  * Steps: 1) Validate phone, 2) Generate agentId, 3) Backup config, 4) Update config, 5) Create workspace, 6) Create state dir
  * On failure: Restore backup, re-throw
+ *
+ * NOTE: Returns oauthNonce but does NOT store it in the DB. The caller must call
+ * setOAuthNonce() AFTER creating the DB row (createState), otherwise the UPDATE
+ * silently affects 0 rows and the nonce is lost.
  */
-export async function createAgent(options: CreateAgentOptions): Promise<string> {
+export async function createAgent(options: CreateAgentOptions): Promise<CreateAgentResult> {
   // Validate phone format
   const { phoneNumber } = options;
   E164PhoneSchema.parse(phoneNumber);
@@ -136,15 +145,17 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
     }
 
     // Step 8: Generate OAuth URL and write to workspace (if web OAuth is configured)
+    // NOTE: We return the nonce but do NOT call setOAuthNonce() here — the DB row
+    // doesn't exist yet. The caller (webhook.ts) stores it after createState().
+    let oauthNonce: string | undefined;
     if (process.env.GOOGLE_WEB_CLIENT_ID && process.env.OAUTH_REDIRECT_URI) {
       try {
         const { generateOAuthUrl } = await import('./oauth-url-generator.js');
-        const { setOAuthNonce } = await import('./state-manager.js');
         const { writeFile } = await import('fs/promises');
 
         const { url, nonce } = generateOAuthUrl(agentId, phoneNumber);
         await writeFile(join(agentConfig.workspace, '.oauth-url.txt'), url, 'utf-8');
-        setOAuthNonce(phoneNumber, nonce);
+        oauthNonce = nonce;
         console.log(`[agent-creator] OAuth URL generated for ${agentId}`);
       } catch (oauthError) {
         // Non-fatal: agent works without OAuth, user can set up later
@@ -157,7 +168,7 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
     // Audit log: agent created successfully
     logAgentCreation(phoneNumber, agentId, true);
 
-    return agentId;
+    return { agentId, oauthNonce };
   } catch (error) {
     // ROLLBACK: restore config if it was updated
     if (configUpdated && backupPath) {

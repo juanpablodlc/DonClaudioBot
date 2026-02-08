@@ -4,7 +4,7 @@
 
 import { readFileSync } from 'fs';
 import { existsSync } from 'fs';
-import { getState, createState } from './state-manager.js';
+import { getState, createState, setOAuthNonce } from './state-manager.js';
 import { createAgent } from './agent-creator.js';
 
 const OPENCLAW_STATE_DIR = process.env.OPENCLAW_STATE_DIR || '/home/node/.openclaw';
@@ -64,10 +64,11 @@ async function processNewPhone(phone: string): Promise<void> {
     console.log(`[session-watcher] New phone detected: ${phone}`);
 
     // Create dedicated agent (writes config, creates workspace, copies templates)
-    const agentId = await createAgent({ phoneNumber: phone });
+    const { agentId, oauthNonce } = await createAgent({ phoneNumber: phone });
 
-    // Record in SQLite
+    // Record in SQLite, then store nonce (must be AFTER row exists)
     createState(phone, agentId, 'active');
+    if (oauthNonce) setOAuthNonce(phone, oauthNonce);
 
     console.log(`[session-watcher] Agent created: ${agentId} for ${phone}`);
 

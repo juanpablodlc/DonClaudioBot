@@ -5,8 +5,12 @@
 // WhatsApp corrupts during link rendering.
 
 import { Router } from 'express';
+import { readFile, writeFile } from 'fs/promises';
+import { join } from 'path';
 import { lookupOAuthNonce, setOAuthStatus } from '../services/state-manager.js';
 import { importTokenToAgent } from '../services/token-importer.js';
+
+const STATE_DIR = process.env.OPENCLAW_STATE_DIR || '/home/node/.openclaw';
 
 export const router = Router();
 
@@ -90,6 +94,23 @@ router.get('/oauth/callback', async (req, res) => {
 
     // Step 4: Import token into agent's gog keyring
     await importTokenToAgent(agentId, email, tokens.refresh_token);
+
+    // Step 5: Update USER.md — replace OAuth link with "Connected" status
+    try {
+      const userMdPath = join(STATE_DIR, `workspace-${agentId}`, 'USER.md');
+      const userMd = await readFile(userMdPath, 'utf-8');
+      const updated = userMd.replace(
+        /## Google OAuth Link[\s\S]*?(?=\n## |\n*$)/,
+        `## Google Account Connected\n\nGoogle account connected: ${email}\nYou can now use gog commands (gmail, calendar, drive).\n`,
+      );
+      if (updated !== userMd) {
+        await writeFile(userMdPath, updated, 'utf-8');
+        console.log(`[oauth] Updated USER.md for agent ${agentId}`);
+      }
+    } catch (err) {
+      // Non-fatal — token is already imported
+      console.warn(`[oauth] Could not update USER.md (non-fatal):`, err);
+    }
 
     console.log(`[oauth] Successfully completed OAuth for ${email} → agent ${agentId}`);
     return res.status(200).send(successPage(email));

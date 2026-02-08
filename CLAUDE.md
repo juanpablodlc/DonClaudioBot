@@ -70,6 +70,8 @@ scripts/
 
 ## Gotchas
 
+**GOG / OAuth / Workspace paths:** STOP. Read `docs/gog-paths.md` BEFORE touching any gog, credentials, XDG_CONFIG_HOME, workspace, or sandbox env var code. There are 3 execution contexts (HOST, MAIN_CONTAINER, SANDBOX) that see the same data at different paths. Every past gog bug came from confusing these. The reference doc has the complete path map, rules, and debugging checklist.
+
 **Deploy freely:** Code updates don't affect WhatsApp auth (it's in volume `don-claudio-state`). Never run `docker volume rm don-claudio-state` unless you want to re-authenticate.
 
 **Isolation:** Each agent has unique `GOG_KEYRING_PASSWORD` and token path. Never share `agentDir`. See ARCHITECTURE_REPORT.md section 7.

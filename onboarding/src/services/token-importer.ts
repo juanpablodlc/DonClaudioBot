@@ -5,7 +5,7 @@ import { execFile } from 'child_process';
 import { writeFile, unlink, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
-import { readConfig } from './config-writer.js';
+import { readConfig, writeConfigAtomic } from './config-writer.js';
 
 const execFileAsync = promisify(execFile);
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR || '/home/node/.openclaw';
@@ -83,6 +83,16 @@ export async function importTokenToAgent(
   } finally {
     // Always delete temp file (contains secrets)
     try { await unlink(tokenFile); } catch { /* ignore */ }
+  }
+
+  // Set GOG_ACCOUNT in agent's sandbox env so gog auto-selects this account
+  // (gog requires --account when multiple token files exist in the keyring)
+  const fullConfig = readConfig();
+  const agentEntry = fullConfig.agents.list.find((a: { id: string }) => a.id === agentId);
+  if (agentEntry?.sandbox?.docker?.env) {
+    agentEntry.sandbox.docker.env.GOG_ACCOUNT = email;
+    await writeConfigAtomic(fullConfig);
+    console.log(`[token-importer] Set GOG_ACCOUNT=${email} for agent ${agentId}`);
   }
 
   console.log(`[token-importer] Token imported for ${email} → agent ${agentId}`);

@@ -19,8 +19,8 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
 -->
 **Phase 12: COMPLETE** — Replace Session Watcher with `message_received` Plugin (see findings.md Patterns 66-73)
 **Phase 13: COMPLETE** — OpenClaw PR submitted: https://github.com/openclaw/openclaw/pull/11372
-**Phase 14: PENDING** — Slash commands
-**Phase 15: PENDING** — Seamless WhatsApp OAuth Flow (HTTPS callback, no localhost, no test users)
+**Phase 14: DEPLOYED, PARTIALLY WORKING** — Slash commands (see issues below)
+**Phase 15: DEPLOYED, TEMPLATE FIX NEEDED** — OAuth flow works server-side, agent template was unclear (fixed)
 
 ## Phases
 <!--
@@ -631,7 +631,26 @@ Submit a PR to `openclaw/openclaw` that makes `channels.<provider>.commands.text
 | **Accept losing admin WhatsApp commands** | Admin operations rarely needed via WhatsApp chat. Use Gateway control UI or SSH instead. |
 | **Proven patch pattern** | Same approach as bindings hot-reload patch (Phase 13) — reliable, survives rebuilds |
 
-**Status:** pending
+**Status:** DEPLOYED (2026-02-08) — Dockerfile patch + entrypoint migrations applied. Partially working.
+
+#### Known Issues (Post-Deployment 2026-02-08)
+
+**Issue 1: `/new`, `/model`, `/elevated` still work on WhatsApp**
+- `shouldHandleTextCommands` patch returns `false` → blocks SOME commands
+- But `/new`, `/model`, `/elevated` still execute and return system responses
+- These likely go through a different code path (session commands? native commands?)
+- **Next step:** Investigate which handler processes these commands. May need a second patch or a different approach (e.g., `models` allowlist already locks model, but `/model` still shows info)
+
+**Issue 2: `/elevated` leaks internal agent IDs and config paths**
+- Response exposed: `agent:user_72d7428db19110ce:whatsapp:dm:+13128749154`
+- Also showed `tools.elevated.allowFrom.whatsapp` config keys
+- Even if the command is blocked functionally, the error message itself is an info leak
+- **Next step:** Either patch the error handler or ensure `/elevated` is fully blocked before reaching the error path
+
+**Issue 3: Agent mentioned "OpenClaw" despite identity constraint**
+- Agent said "If someone else set up this OpenClaw instance" in error message
+- AGENTS.md constraint #6 says "Never mention OpenClaw" but LLM didn't comply
+- **Next step:** Strengthen identity constraint with more explicit phrasing and repetition. Consider adding negative examples.
 
 ---
 
@@ -834,7 +853,22 @@ If the command doesn't exist in v0.9.0:
 - If token import fails: Fall back to existing `gog auth add --manual` flow (still works, just bad UX)
 - If callback endpoint crashes: Agent templates still have manual auth instructions as fallback
 
-**Status:** pending
+**Status:** DEPLOYED (2026-02-08) — Server-side flow fully working. Agent template fixed (clearer instructions).
+
+#### Post-Deployment Results (2026-02-08)
+
+**What works:**
+- Plugin detected unknown phone in <1s
+- Webhook fired, agent created with English template
+- OAuth URL generated and written to `.oauth-url.txt`
+- Caddy TLS serving on `auth.donclaudio.app`
+- All env vars present in container
+
+**What failed (now fixed):**
+- Agent ignored `.oauth-url.txt` and tried `gog auth add --manual` (old flow)
+- Root cause: AGENTS.md template had fallback instruction `gog auth add <user_email> --manual` which the LLM preferred over reading the file
+- Fix: Rewrote Google section in both EN and ES templates — removed ALL mention of `gog auth add`, made `.oauth-url.txt` the only path, added explicit "IMPORTANT: Do NOT run gog auth add" guardrails
+- **Needs re-test:** Reset user, redeploy with new templates, verify agent sends the OAuth URL
 
 ---
 

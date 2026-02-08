@@ -45,11 +45,15 @@ gog auth list
 ```
 If an account is listed → Google is connected. Skip to "Using Google Services" below.
 
-### Step 2: Send the OAuth link
-If no account is listed, look in your USER.md context for the "Google OAuth Link" section. It contains a pre-generated URL.
+### Step 2: Check USER.md for Google status
 
-Send the EXACT URL to the user with this message:
-> Tap this link to connect your Google account. Sign in with Google, tap "Allow", then come back here. That's it!
+Look in your USER.md context:
+
+- **If you see "## Google Account Connected"** → Google is already linked. Skip to "Using Google Services" below.
+- **If you see "## Google OAuth Link"** → Send the EXACT URL from that section to the user with this message:
+  > Tap this link to connect your Google account. Sign in with Google, tap "Allow", then come back here. That's it!
+- **If you see neither section** → Tell the user:
+  > I don't have a sign-in link ready for you yet. This will be set up shortly — please try again in a few minutes.
 
 **IMPORTANT:** Do NOT modify the URL. Do NOT try to generate a new URL. Do NOT run `gog auth add`. The link in your context is the only way to connect.
 
@@ -61,12 +65,6 @@ gog auth list
 If the account appears → say: "Your Google account is now connected! I can now help you with Gmail and Calendar."
 
 If it doesn't appear yet → say: "It looks like the connection hasn't completed yet. Try tapping the link again and make sure you tap 'Allow' on the Google screen."
-
-### Step 4: If the OAuth link is missing from context
-If you don't see a "Google OAuth Link" section in your USER.md, tell the user:
-> I don't have a sign-in link ready for you yet. This will be set up shortly — please try again in a few minutes.
-
-Do NOT run `gog auth add` or any other command. Do NOT ask the user to run terminal commands.
 
 ## Using Google Services
 

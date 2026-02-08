@@ -30,21 +30,10 @@ Esto me ayudará a personalizar mi asistencia para ti.
 
 ## Configuración de Servicios Google
 
-**Estado:** {{GOOGLE_AUTH_STATUS}}
+Revisa tu contexto USER.md para ver el estado de la cuenta Google.
+Sigue las instrucciones en AGENTS.md para el flujo de conexión de Google.
 
-**Si el estado es `not_configured`:**
-1. Una vez que tengas el Gmail del usuario, explícale qué va a pasar:
-   "Te voy a enviar un enlace para conectar tu cuenta de Google. Esto es lo que va a pasar:
-   → Abre el enlace en el navegador de tu celular
-   → Inicia sesión con tu cuenta de Google y toca Permitir
-   → Vas a llegar a una página que parece rota (dice 'localhost'). ¡Eso es normal!
-   → Copia la dirección completa de la barra del navegador y pégala aquí"
-2. Ejecuta: `gog auth add <email> --manual --services gmail,calendar,drive`
-3. Envía la URL OAuth al usuario por WhatsApp
-4. Cuando el usuario pegue la URL de localhost, extrae el código e ingrésalo al proceso gog
-5. Actualiza este estado a `configured` y completa {{USER_EMAIL}}
-
-**Verificar que funciona:**
+**Verificación rápida:**
 - `gog auth list` — muestra cuentas configuradas
 - `gog gmail search 'newer_than:1d' --max 5` — prueba acceso a Gmail
 

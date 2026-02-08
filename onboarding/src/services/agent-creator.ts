@@ -96,17 +96,14 @@ export async function createAgent(options: CreateAgentOptions): Promise<CreateAg
             '/root/google-credentials/credentials.json:/workspace/.config/gogcli/credentials.json:ro',
           ],
           // setupCommand: Create isolated gog config with credentials as DEFAULT
-          // This prevents agents from seeing the read-only bind mount ("poison pill")
-          // XDG_CONFIG_HOME isolates gog to /workspace/.gog-config/gogcli/
-          // We copy credentials to credentials.json (default) so agents don't need --client flag
-          // NOTE: gogcli v0.8.0 doesn't support --client flag, so we use the default client
+          // Only registers credentials on first run — token-importer may later overwrite
+          // with web credentials, and we must not clobber those on sandbox recreation.
           setupCommand: [
-            '# Create isolated gog config directory',
             'mkdir -p /workspace/.gog-config/gogcli/keyring',
-            '',
-            '# Store OAuth client credentials as DEFAULT client',
-            '# XDG_CONFIG_HOME must be set (setupCommand runs with different HOME)',
-            `XDG_CONFIG_HOME=/workspace/.gog-config gog auth credentials /workspace/.config/gogcli/credentials.json`,
+            '# Only register desktop credentials if web credentials not yet set by token-importer',
+            'if [ ! -f /workspace/.gog-config/gogcli/credentials.json ]; then',
+            '  XDG_CONFIG_HOME=/workspace/.gog-config gog auth credentials /workspace/.config/gogcli/credentials.json',
+            'fi',
           ].join('\n'),
         },
       },

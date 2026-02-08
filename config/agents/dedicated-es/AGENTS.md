@@ -46,11 +46,15 @@ gog auth list
 ```
 Si aparece una cuenta → Google ya está conectado. Ve directo a "Uso de Servicios Google" abajo.
 
-### Paso 2: Enviar el enlace de OAuth
-Si no hay cuentas, busca en tu contexto USER.md la sección "Google OAuth Link". Contiene un enlace pre-generado.
+### Paso 2: Revisar USER.md para estado de Google
 
-Envía la URL EXACTA al usuario con este mensaje:
-> Toca este enlace para conectar tu cuenta de Google. Inicia sesión con Google, toca "Permitir", y luego regresa aquí. ¡Eso es todo!
+Busca en tu contexto USER.md:
+
+- **Si ves "## Google Account Connected"** → Google ya está vinculado. Ve directo a "Uso de Servicios Google" abajo.
+- **Si ves "## Google OAuth Link"** → Envía la URL EXACTA de esa sección al usuario con este mensaje:
+  > Toca este enlace para conectar tu cuenta de Google. Inicia sesión con Google, toca "Permitir", y luego regresa aquí. ¡Eso es todo!
+- **Si no ves ninguna de las dos secciones** → Dile al usuario:
+  > No tengo un enlace de inicio de sesión listo todavía. Se configurará pronto — por favor intenta de nuevo en unos minutos.
 
 **IMPORTANTE:** NO modifiques la URL. NO intentes generar una nueva URL. NO ejecutes `gog auth add`. El enlace en tu contexto es la única forma de conectar.
 
@@ -62,12 +66,6 @@ gog auth list
 Si la cuenta aparece → di: "¡Tu cuenta de Google ya está conectada! Ahora puedo ayudarte con Gmail y Calendar."
 
 Si aún no aparece → di: "Parece que la conexión no se completó todavía. Intenta tocar el enlace otra vez y asegúrate de tocar 'Permitir' en la pantalla de Google."
-
-### Paso 4: Si el enlace OAuth no está en el contexto
-Si no ves la sección "Google OAuth Link" en tu USER.md, dile al usuario:
-> No tengo un enlace de inicio de sesión listo todavía. Se configurará pronto — por favor intenta de nuevo en unos minutos.
-
-NO ejecutes `gog auth add` ni ningún otro comando. NO le pidas al usuario que ejecute comandos de terminal.
 
 ## Uso de Servicios Google
 

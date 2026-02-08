@@ -4,6 +4,10 @@
       "model": {
         "primary": "zai/glm-4.7"
       },
+      "models": { "zai/glm-4.7": {} },
+      "thinkingDefault": "low",
+      "elevatedDefault": "off",
+      "verboseDefault": "off",
       "workspace": "~/.openclaw/workspace",
       "sandbox": {
         "mode": "off"
@@ -17,6 +21,9 @@
         "workspace": "~/.openclaw/workspace-welcome"
       }
     ]
+  },
+  "commands": {
+    "text": false
   },
   "bindings": [],
   "channels": {

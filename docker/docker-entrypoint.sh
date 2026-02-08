@@ -45,6 +45,44 @@ else
         echo "[entrypoint] dmScope set ✓"
     fi
 
+    # Migrate: disable text slash commands (Phase 14 — prevents /model, /think cost risk, /status info leak)
+    if node -e "const JSON5=require('json5'),fs=require('fs');const c=JSON5.parse(fs.readFileSync('$CONFIG_PATH','utf-8'));process.exit(c.commands?.text===false?0:1)"; then
+        echo "[entrypoint] Config verified: commands.text=false ✓"
+    else
+        echo "[entrypoint] Setting commands.text=false (disables slash commands for WhatsApp users)..."
+        node -e "
+            const JSON5 = require('json5');
+            const fs = require('fs');
+            const p = '$CONFIG_PATH';
+            const config = JSON5.parse(fs.readFileSync(p, 'utf-8'));
+            if (!config.commands) config.commands = {};
+            config.commands.text = false;
+            fs.writeFileSync(p, JSON5.stringify(config, null, 2));
+        "
+        echo "[entrypoint] commands.text=false set ✓"
+    fi
+
+    # Migrate: lock model allowlist to zai/glm-4.7 (Phase 14 — prevents /model directive from switching to expensive models)
+    if node -e "const JSON5=require('json5'),fs=require('fs');const c=JSON5.parse(fs.readFileSync('$CONFIG_PATH','utf-8'));const m=c.agents?.defaults?.models;process.exit(m&&Object.keys(m).length===1&&m['zai/glm-4.7']?0:1)"; then
+        echo "[entrypoint] Config verified: models allowlist=zai/glm-4.7 ✓"
+    else
+        echo "[entrypoint] Setting models allowlist to zai/glm-4.7 (locks model selection)..."
+        node -e "
+            const JSON5 = require('json5');
+            const fs = require('fs');
+            const p = '$CONFIG_PATH';
+            const config = JSON5.parse(fs.readFileSync(p, 'utf-8'));
+            if (!config.agents) config.agents = {};
+            if (!config.agents.defaults) config.agents.defaults = {};
+            config.agents.defaults.models = { 'zai/glm-4.7': {} };
+            config.agents.defaults.thinkingDefault = 'low';
+            config.agents.defaults.elevatedDefault = 'off';
+            config.agents.defaults.verboseDefault = 'off';
+            fs.writeFileSync(p, JSON5.stringify(config, null, 2));
+        "
+        echo "[entrypoint] models allowlist set ✓"
+    fi
+
     # Migrate: ensure exactly one welcome agent exists (deduplicate if needed)
     # Uses node+JSON5 — grep fails on JSON5 unquoted keys (Pattern 24)
     node -e "

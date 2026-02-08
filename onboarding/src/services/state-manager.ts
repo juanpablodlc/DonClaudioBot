@@ -26,6 +26,8 @@ export interface OnboardingState {
   created_at: string;
   updated_at: string;
   expires_at?: string;
+  oauth_nonce?: string;
+  oauth_status?: string;
 }
 
 /**
@@ -38,6 +40,17 @@ export function initDatabase(): void {
   // Read and execute schema
   const schema = readFileSync(SCHEMA_PATH, 'utf-8');
   db.exec(schema);
+
+  // Migration: Add OAuth columns if missing (Phase 15)
+  // CREATE TABLE IF NOT EXISTS won't add new columns to existing tables
+  const columns = db.pragma('table_info(onboarding_states)') as { name: string }[];
+  const colNames = new Set(columns.map(c => c.name));
+  if (!colNames.has('oauth_nonce')) {
+    db.exec("ALTER TABLE onboarding_states ADD COLUMN oauth_nonce TEXT");
+  }
+  if (!colNames.has('oauth_status')) {
+    db.exec("ALTER TABLE onboarding_states ADD COLUMN oauth_status TEXT DEFAULT 'pending'");
+  }
 }
 
 /**
@@ -130,6 +143,39 @@ export function getByAgentId(agentId: string): OnboardingState | null {
   if (!db) initDatabase();
   const stmt = db!.prepare('SELECT * FROM onboarding_states WHERE agent_id = ?');
   return stmt.get(agentId) as OnboardingState | null;
+}
+
+/**
+ * Store OAuth nonce for CSRF verification
+ */
+export function setOAuthNonce(phone: string, nonce: string): void {
+  if (!db) initDatabase();
+  const stmt = db!.prepare('UPDATE onboarding_states SET oauth_nonce = ? WHERE phone_number = ?');
+  stmt.run(nonce, phone);
+}
+
+/**
+ * Verify and consume OAuth nonce (single-use)
+ * Returns true if nonce matches and was consumed, false otherwise
+ */
+export function consumeOAuthNonce(phone: string, nonce: string): boolean {
+  if (!db) initDatabase();
+  const state = getState(phone);
+  if (!state || state.oauth_nonce !== nonce) return false;
+
+  // Clear nonce (single-use)
+  const stmt = db!.prepare('UPDATE onboarding_states SET oauth_nonce = NULL, oauth_status = ? WHERE phone_number = ?');
+  stmt.run('complete', phone);
+  return true;
+}
+
+/**
+ * Set OAuth status for a phone number
+ */
+export function setOAuthStatus(phone: string, status: string): void {
+  if (!db) initDatabase();
+  const stmt = db!.prepare('UPDATE onboarding_states SET oauth_status = ? WHERE phone_number = ?');
+  stmt.run(status, phone);
 }
 
 /**

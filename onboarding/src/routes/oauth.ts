@@ -1,0 +1,129 @@
+// OAuth Callback Route
+// Handles Google OAuth redirect after user grants consent
+
+import { Router } from 'express';
+import { decodeState } from '../lib/oauth-state.js';
+import { consumeOAuthNonce, setOAuthStatus } from '../services/state-manager.js';
+import { importTokenToAgent } from '../services/token-importer.js';
+
+export const router = Router();
+
+/**
+ * GET /oauth/callback?code=AUTH_CODE&state=STATE
+ * Google redirects here after user grants consent
+ */
+router.get('/oauth/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+
+  // Handle Google OAuth errors
+  if (error) {
+    console.error(`[oauth] Google returned error: ${error}`);
+    return res.status(400).send(errorPage('Google denied access. Please try again from WhatsApp.'));
+  }
+
+  if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+    return res.status(400).send(errorPage('Missing authorization code or state parameter.'));
+  }
+
+  try {
+    // Step 1: Decode and validate HMAC-signed state
+    const payload = decodeState(state);
+
+    // Step 2: Verify single-use nonce
+    const nonceValid = consumeOAuthNonce(payload.phone, payload.nonce);
+    if (!nonceValid) {
+      console.warn(`[oauth] Invalid or already-used nonce for ${payload.phone}`);
+      return res.status(400).send(errorPage('This link has already been used or has expired. Please request a new one from your assistant.'));
+    }
+
+    // Step 3: Exchange auth code for tokens
+    const clientId = process.env.GOOGLE_WEB_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_WEB_CLIENT_SECRET;
+    const redirectUri = process.env.OAUTH_REDIRECT_URI;
+
+    if (!clientId || !clientSecret || !redirectUri) {
+      throw new Error('OAuth environment variables not configured');
+    }
+
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const err = await tokenResponse.text();
+      console.error(`[oauth] Token exchange failed: ${err}`);
+      setOAuthStatus(payload.phone, 'failed');
+      return res.status(500).send(errorPage('Failed to exchange authorization code. Please try again.'));
+    }
+
+    const tokens = await tokenResponse.json() as {
+      access_token: string;
+      refresh_token?: string;
+      id_token?: string;
+      scope: string;
+    };
+
+    if (!tokens.refresh_token) {
+      console.error('[oauth] No refresh_token in response (user may have already granted access)');
+      setOAuthStatus(payload.phone, 'failed');
+      return res.status(500).send(errorPage('No refresh token received. Please revoke app access in your Google Account settings and try again.'));
+    }
+
+    // Step 4: Extract email from id_token (JWT decode, no verification — trusted source)
+    let email = 'unknown';
+    if (tokens.id_token) {
+      try {
+        const payloadPart = tokens.id_token.split('.')[1];
+        const decoded = JSON.parse(Buffer.from(payloadPart, 'base64url').toString());
+        email = decoded.email || email;
+      } catch { /* fall back to 'unknown' */ }
+    }
+
+    // Step 5: Import token into agent's gog keyring
+    await importTokenToAgent(payload.agentId, email, tokens.refresh_token);
+
+    console.log(`[oauth] Successfully completed OAuth for ${email} → agent ${payload.agentId}`);
+    return res.status(200).send(successPage(email));
+
+  } catch (err) {
+    console.error('[oauth] Callback error:', err);
+    return res.status(500).send(errorPage('Something went wrong. Please try again from WhatsApp.'));
+  }
+});
+
+function successPage(email: string): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connected!</title>
+<style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f0fdf4}
+.card{text-align:center;padding:2rem;max-width:400px}
+.check{font-size:4rem;margin-bottom:1rem}h1{color:#166534;margin:0.5rem 0}p{color:#4b5563}</style>
+</head><body><div class="card">
+<div class="check">&#10003;</div>
+<h1>Connected!</h1>
+<p>Your Google account (${email}) is now linked.</p>
+<p>You can close this tab and return to WhatsApp.</p>
+</div></body></html>`;
+}
+
+function errorPage(message: string): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error</title>
+<style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#fef2f2}
+.card{text-align:center;padding:2rem;max-width:400px}
+.x{font-size:4rem;margin-bottom:1rem;color:#dc2626}h1{color:#991b1b;margin:0.5rem 0}p{color:#4b5563}</style>
+</head><body><div class="card">
+<div class="x">&#10007;</div>
+<h1>Something went wrong</h1>
+<p>${message}</p>
+</div></body></html>`;
+}

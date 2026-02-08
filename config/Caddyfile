@@ -1,0 +1,8 @@
+{$OAUTH_DOMAIN} {
+    handle /oauth/* {
+        reverse_proxy don-claudio-bot:3000
+    }
+    handle {
+        respond "Not Found" 404
+    }
+}

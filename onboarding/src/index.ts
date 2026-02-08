@@ -5,6 +5,7 @@ import express from 'express';
 import { initDatabase } from './services/state-manager.js';
 import { router as webhookRouter } from './routes/webhook.js';
 import { router as stateRouter } from './routes/state.js';
+import { router as oauthRouter } from './routes/oauth.js';
 
 const app = express();
 
@@ -19,10 +20,13 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Mount OAuth callback route FIRST (no auth required — Google redirects users here)
+app.use('/', oauthRouter);
+
 // Mount webhook routes
 app.use('/', webhookRouter);
 
-// Mount state routes
+// Mount state routes (has router-level auth middleware)
 app.use('/', stateRouter);
 
 // Configuration

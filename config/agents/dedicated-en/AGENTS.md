@@ -42,16 +42,22 @@ Before accessing Gmail or Calendar, check if Google auth is configured:
 gog auth list
 ```
 
-If no accounts are shown, start the OAuth flow:
+If no accounts are shown, read the OAuth URL from your workspace:
+```bash
+cat /workspace/.oauth-url.txt
+```
+Send this URL to the user with the message: "Tap this link to connect your Google account. After signing in and granting access, you can close the browser and come back here."
+
+After the user completes OAuth, verify the connection:
+```bash
+gog auth list
+```
+If the account appears, confirm: "Your Google account is now connected!"
+
+If `.oauth-url.txt` doesn't exist, fall back to the manual flow:
 ```bash
 gog auth add <user_email> --manual --services gmail,calendar,drive
 ```
-This outputs an OAuth URL. Send it to the user and ask them to:
-1. Open the link in their browser
-2. Sign in and authorize access
-3. Send back the authorization code Google displays
-
-After receiving the code, provide it to complete authentication.
 
 **Daily usage:**
 - New emails: `gog gmail search 'is:unread newer_than:1d' --max 10`

@@ -19,6 +19,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Google OAuth client credentials (shared, read-only)
       - /root/google-credentials:/home/node/.config/gogcli:ro
+      # Google Web OAuth client credentials (for HTTPS callback flow)
+      - /root/google-credentials-web/credentials.json:/home/node/.config/gogcli-web/credentials.json:ro
     environment:
       - NODE_ENV=production
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-change-me}
@@ -26,6 +28,10 @@ services:
       - ZAI_API_KEY=${ZAI_API_KEY:-change-me}
       - BAILEYS_SIDECAR_ENABLED=${BAILEYS_SIDECAR_ENABLED:-false}
       - DOCKER_API_VERSION=${DOCKER_API_VERSION:-1.44}
+      - OAUTH_DOMAIN=${OAUTH_DOMAIN:-auth.donclaudio.app}
+      - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-https://auth.donclaudio.app/oauth/callback/}
+      - GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID}
+      - GOOGLE_WEB_CLIENT_SECRET=${GOOGLE_WEB_CLIENT_SECRET}
     networks:
       - don-claudio-network
     # Security hardening - run as non-root user
@@ -58,6 +64,22 @@ services:
       retries: 3
       start_period: 5s
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: don-claudio-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - OAUTH_DOMAIN=${OAUTH_DOMAIN:-auth.donclaudio.app}
+    networks:
+      - don-claudio-network
+
 volumes:
   # Persistent state - survives deployments
   # Contains:
@@ -66,6 +88,10 @@ volumes:
   # - ~/.openclaw/onboarding.db (onboarding state)
   # - ~/.openclaw/agents/*/ (per-agent sessions and data)
   don-claudio-state:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
     driver: local
 
 networks:

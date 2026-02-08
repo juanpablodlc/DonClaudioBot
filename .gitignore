@@ -11,6 +11,7 @@ node_modules/
 
 # Google OAuth credentials (NEVER commit)
 config/client_secret_*.json
+client_secret_*.json
 
 # State
 state/

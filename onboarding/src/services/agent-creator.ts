@@ -135,6 +135,23 @@ export async function createAgent(options: CreateAgentOptions): Promise<string> 
       }
     }
 
+    // Step 8: Generate OAuth URL and write to workspace (if web OAuth is configured)
+    if (process.env.GOOGLE_WEB_CLIENT_ID && process.env.OAUTH_REDIRECT_URI) {
+      try {
+        const { generateOAuthUrl } = await import('./oauth-url-generator.js');
+        const { setOAuthNonce } = await import('./state-manager.js');
+        const { writeFile } = await import('fs/promises');
+
+        const { url, nonce } = generateOAuthUrl(agentId, phoneNumber);
+        await writeFile(join(agentConfig.workspace, '.oauth-url.txt'), url, 'utf-8');
+        setOAuthNonce(phoneNumber, nonce);
+        console.log(`[agent-creator] OAuth URL generated for ${agentId}`);
+      } catch (oauthError) {
+        // Non-fatal: agent works without OAuth, user can set up later
+        console.warn('[agent-creator] OAuth URL generation failed (non-fatal):', oauthError);
+      }
+    }
+
     // Gateway auto-reloads via fs.watch() - no manual reload needed
 
     // Audit log: agent created successfully

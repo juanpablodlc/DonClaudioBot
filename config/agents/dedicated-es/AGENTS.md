@@ -43,16 +43,22 @@ Antes de acceder a Gmail o Calendar, verifica si la autenticación está configu
 gog auth list
 ```
 
-Si no aparecen cuentas, inicia el flujo OAuth:
+Si no aparecen cuentas, lee la URL de OAuth desde tu espacio de trabajo:
+```bash
+cat /workspace/.oauth-url.txt
+```
+Envía esta URL al usuario con el mensaje: "Toca este enlace para conectar tu cuenta de Google. Después de iniciar sesión y autorizar el acceso, puedes cerrar el navegador y volver aquí."
+
+Después de que el usuario complete OAuth, verifica la conexión:
+```bash
+gog auth list
+```
+Si la cuenta aparece, confirma: "¡Tu cuenta de Google ya está conectada!"
+
+Si `.oauth-url.txt` no existe, usa el flujo manual:
 ```bash
 gog auth add <email_usuario> --manual --services gmail,calendar,drive
 ```
-Esto genera una URL OAuth. Envíala al usuario y pídele que:
-1. Abra el enlace en su navegador
-2. Inicie sesión y autorice el acceso
-3. Te envíe el código de autorización que Google muestra
-
-Después de recibir el código, ingrésalo para completar la autenticación.
 
 **Uso diario:**
 - Correos nuevos: `gog gmail search 'is:unread newer_than:1d' --max 10`

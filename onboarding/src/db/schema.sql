@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS onboarding_states (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   expires_at TEXT,                            -- NULL = never expires
+  oauth_nonce TEXT,                          -- Single-use CSRF nonce for OAuth state
+  oauth_status TEXT DEFAULT 'pending',       -- pending | complete | failed
   CHECK(phone_number LIKE '+%')               -- E.164 validation
 );
 
@@ -42,6 +44,10 @@ CREATE INDEX IF NOT EXISTS idx_agent_lookup
 CREATE INDEX IF NOT EXISTS idx_expiration
   ON onboarding_states(expires_at)
   WHERE expires_at IS NOT NULL;
+
+-- Migration: Add OAuth columns (Phase 15) — safe to run repeatedly
+-- SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so check via pragma
+-- These will error silently if columns already exist (handled in state-manager.ts)
 
 -- Auto-update timestamp trigger
 CREATE TRIGGER IF NOT EXISTS update_updated_at

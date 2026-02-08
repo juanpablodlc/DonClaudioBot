@@ -83,6 +83,30 @@ else
         echo "[entrypoint] models allowlist set ✓"
     fi
 
+    # Migrate: set agents.defaults.sandbox.mode=all (fixes sandbox not activating)
+    # ROOT CAUSE: OpenClaw's embedded runner falls back to params.sessionId (a UUID) when
+    # params.sessionKey is empty. UUIDs fail parseAgentSessionKey() (needs agent:<id>:<rest>),
+    # so sandbox resolution falls back to the default agent's config. With defaults.sandbox.mode
+    # set to "off", this silently disables sandbox for ALL agents regardless of per-agent config.
+    # Setting defaults to "all" makes the fallback path also activate sandbox correctly.
+    if node -e "const JSON5=require('json5'),fs=require('fs');const c=JSON5.parse(fs.readFileSync('$CONFIG_PATH','utf-8'));process.exit(c.agents?.defaults?.sandbox?.mode==='all'?0:1)"; then
+        echo "[entrypoint] Config verified: agents.defaults.sandbox.mode=all ✓"
+    else
+        echo "[entrypoint] Setting agents.defaults.sandbox.mode=all (required for sandbox activation)..."
+        node -e "
+            const JSON5 = require('json5');
+            const fs = require('fs');
+            const p = '$CONFIG_PATH';
+            const config = JSON5.parse(fs.readFileSync(p, 'utf-8'));
+            if (!config.agents) config.agents = {};
+            if (!config.agents.defaults) config.agents.defaults = {};
+            if (!config.agents.defaults.sandbox) config.agents.defaults.sandbox = {};
+            config.agents.defaults.sandbox.mode = 'all';
+            fs.writeFileSync(p, JSON5.stringify(config, null, 2));
+        "
+        echo "[entrypoint] agents.defaults.sandbox.mode=all set ✓"
+    fi
+
     # Migrate: ensure exactly one welcome agent exists (deduplicate if needed)
     # Uses node+JSON5 — grep fails on JSON5 unquoted keys (Pattern 24)
     node -e "

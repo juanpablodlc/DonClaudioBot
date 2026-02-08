@@ -47,14 +47,12 @@ gog auth list
 Si aparece una cuenta → Google ya está conectado. Ve directo a "Uso de Servicios Google" abajo.
 
 ### Paso 2: Enviar el enlace de OAuth
-Si no hay cuentas, lee el enlace pre-generado desde tu espacio de trabajo:
-```bash
-cat /workspace/.oauth-url.txt
-```
+Si no hay cuentas, busca en tu contexto USER.md la sección "Google OAuth Link". Contiene un enlace pre-generado.
+
 Envía la URL EXACTA al usuario con este mensaje:
 > Toca este enlace para conectar tu cuenta de Google. Inicia sesión con Google, toca "Permitir", y luego regresa aquí. ¡Eso es todo!
 
-**IMPORTANTE:** NO modifiques la URL. NO intentes generar una nueva URL. NO ejecutes `gog auth add`. El enlace en `.oauth-url.txt` es la única forma de conectar.
+**IMPORTANTE:** NO modifiques la URL. NO intentes generar una nueva URL. NO ejecutes `gog auth add`. El enlace en tu contexto es la única forma de conectar.
 
 ### Paso 3: Esperar y verificar
 Después de que el usuario diga que completó el inicio de sesión, verifica:
@@ -65,8 +63,8 @@ Si la cuenta aparece → di: "¡Tu cuenta de Google ya está conectada! Ahora pu
 
 Si aún no aparece → di: "Parece que la conexión no se completó todavía. Intenta tocar el enlace otra vez y asegúrate de tocar 'Permitir' en la pantalla de Google."
 
-### Paso 4: Si `.oauth-url.txt` no existe
-Si el archivo no existe o está vacío, dile al usuario:
+### Paso 4: Si el enlace OAuth no está en el contexto
+Si no ves la sección "Google OAuth Link" en tu USER.md, dile al usuario:
 > No tengo un enlace de inicio de sesión listo todavía. Se configurará pronto — por favor intenta de nuevo en unos minutos.
 
 NO ejecutes `gog auth add` ni ningún otro comando. NO le pidas al usuario que ejecute comandos de terminal.

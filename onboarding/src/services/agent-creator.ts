@@ -154,7 +154,15 @@ export async function createAgent(options: CreateAgentOptions): Promise<CreateAg
         const { writeFile } = await import('fs/promises');
 
         const { url, nonce } = generateOAuthUrl(agentId, phoneNumber);
-        await writeFile(join(agentConfig.workspace, '.oauth-url.txt'), url, 'utf-8');
+        // Write to USER.md (loaded as system context by OpenClaw) so the agent
+        // can see it in its prompt. Sandbox blocks file reads from workspace,
+        // but system context files are loaded by the gateway before sandboxing.
+        const { readFile } = await import('fs/promises');
+        const userMdPath = join(agentConfig.workspace, 'USER.md');
+        let userMd = '';
+        try { userMd = await readFile(userMdPath, 'utf-8'); } catch { /* template not copied yet is fine */ }
+        const oauthSection = `\n\n## Google OAuth Link\n\nSend this EXACT link when the user wants to connect Gmail/Calendar:\n${url}\n`;
+        await writeFile(userMdPath, userMd + oauthSection, 'utf-8');
         oauthNonce = nonce;
         console.log(`[agent-creator] OAuth URL generated for ${agentId}`);
       } catch (oauthError) {

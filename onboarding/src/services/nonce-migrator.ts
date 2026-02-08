@@ -4,7 +4,7 @@
 // This regenerates nonces + OAuth URLs for affected users at startup.
 
 import Database from 'better-sqlite3';
-import { writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { DB_PATH, setOAuthNonce } from './state-manager.js';
 import { generateOAuthUrl } from './oauth-url-generator.js';
@@ -37,7 +37,14 @@ export function migrateNullNonces(): void {
       const { url, nonce } = generateOAuthUrl(row.agent_id, row.phone_number);
       const workspace = join(stateDir, `workspace-${row.agent_id}`);
 
-      writeFileSync(join(workspace, '.oauth-url.txt'), url, 'utf-8');
+      // Append OAuth URL to USER.md (loaded as system context by OpenClaw)
+      const userMdPath = join(workspace, 'USER.md');
+      let userMd = '';
+      try { userMd = readFileSync(userMdPath, 'utf-8'); } catch { /* file may not exist */ }
+      if (!userMd.includes('## Google OAuth Link')) {
+        const oauthSection = `\n\n## Google OAuth Link\n\nSend this EXACT link when the user wants to connect Gmail/Calendar:\n${url}\n`;
+        writeFileSync(userMdPath, userMd + oauthSection, 'utf-8');
+      }
       setOAuthNonce(row.phone_number, nonce);
 
       console.log(`[nonce-migrator] Regenerated nonce for ${row.agent_id}`);

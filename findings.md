@@ -614,18 +614,20 @@ To:
 **Our Implementation:** onboarding/src/services/agent-creator.ts
 
 ### Bug #2: Bindings Hot-Reload Broken (Core Routing Bug)
-**Severity:** Critical | **Status:** Open, upstream PR #11372 pending review + PR #7747 alternative
+**Severity:** Critical | **Status:** PATCHED locally (Dockerfile RUN step), upstream PR #11372 pending review
 **Description:** New agent bindings written to `openclaw.json` don't take effect until Gateway restart. Channel monitors (WhatsApp, Telegram, Discord, Google Chat, Feishu, Matrix) capture config at startup — new bindings invisible to routing.
 **Root Cause:** `monitorWebChannel` calls `loadConfig()` ONCE at startup, captures in closure, never refreshes for routing decisions.
 **GitHub Issues:** #6602 (WhatsApp), #9351 (Telegram), #9198 (Google Chat), #10764 (Feishu), #3165 (Matrix)
 **Upstream PRs:**
   - **#11372** (juanpablodlc, 2026-02-07): "make bindings dynamic by calling loadConfig() per-message" — Affects 5 files across 3 channels. Uses existing 200ms cache. Awaiting reviewer approval on test robustness.
   - **#7747** (NikolasP98): Alternative "zero-latency hot-reload for agent bindings" approach
-**Our Workaround:** SIGUSR1 → Launcher IPC → SIGTERM Gateway → respawn (session-watcher.ts + launcher.js). Every new user onboarding triggers ~2-5s restart.
-**Impact:** In-flight messages dropped during restarts (no graceful drain). Affects all multi-user setups.
+**Our Fix:** Dockerfile `RUN` step patches `createWebOnMessageHandler` in `loader-*.js` to call `loadConfig()` per-message instead of using stale startup snapshot. Validated 2026-02-07: message 1 → welcome agent, message 2 → dedicated agent, zero restarts.
+**Previous workaround (removed):** SIGUSR1 → Launcher IPC → SIGTERM Gateway → respawn. No longer needed.
+**Cleanup:** Remove Dockerfile patch when OpenClaw ships the fix upstream (PR #11372 or equivalent).
 
 ### Bug #3: Pattern 65 — JSON5 Grep Issue (OUR IMPLEMENTATION BUG, NOT UPSTREAM)
-**This is NOT an OpenClaw bug.** Our entrypoint uses `grep -q '"welcome"'` on JSON5 config (unquoted keys). Always use `node -e` with JSON5.parse() for config inspection.
+**Severity:** Medium | **Status:** FIXED (Phase 12, commit 11ba0b6)
+**Description:** Entrypoint used `grep -q '"welcome"'` on JSON5 config (unquoted keys), causing welcome agent duplication on every restart. **Fixed:** Replaced grep with `node -e` + JSON5.parse() and added deduplication logic in `docker-entrypoint.sh`.
 
 ---
 

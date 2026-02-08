@@ -63,13 +63,13 @@
 - Pattern 62: npx wrapper doesn't propagate signals — use direct node invocation
 - Pattern 63: dmScope belongs under `session`, not `gateway`
 - Pattern 64: In-flight messages dropped during gateway restart (known limitation)
-- Pattern 65: Welcome agent duplication from grep on JSON5 (fix needed)
+- Pattern 65: Welcome agent duplication from grep on JSON5 (FIXED in Phase 12)
 
 **Verification:**
 - ✅ Gateway restart via SIGUSR1 tested in production (clean cycle, new bindings picked up)
 - ✅ 6 users routing to dedicated agents correctly
 - ✅ dmScope self-healing works on existing volumes
-- 🔲 Welcome agent duplication fix (identified, not yet fixed)
+- ✅ Welcome agent duplication fix (fixed in Phase 12, commit 11ba0b6)
 - 🔲 Dropped message mitigation (identified, no fix designed)
 
 **Git commits:**

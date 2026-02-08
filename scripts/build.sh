@@ -17,7 +17,7 @@ rm -rf onboarding/dist
 
 # Install dependencies
 echo "Installing dependencies..."
-npm ci
+npm ci --legacy-peer-deps
 
 # Build TypeScript
 echo "Building TypeScript..."

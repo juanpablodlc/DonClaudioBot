@@ -19,6 +19,8 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
 -->
 **Phase 12: COMPLETE** — Replace Session Watcher with `message_received` Plugin (see findings.md Patterns 66-73)
 **Phase 13: COMPLETE** — OpenClaw PR submitted: https://github.com/openclaw/openclaw/pull/11372
+**Phase 14: PENDING** — Slash commands
+**Phase 15: PENDING** — Seamless WhatsApp OAuth Flow (HTTPS callback, no localhost, no test users)
 
 ## Phases
 <!--
@@ -32,15 +34,6 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHAT: All prerequisite infrastructure tasks completed in previous work sessions.
   WHY: Documents what's already done so we don't repeat work.
 -->
-- [x] P0-DEPLOY-000: Pre-deployment backup procedure (scripts/backup.sh created)
-- [x] P0-DEPLOY-001: Verify prerequisites (scripts/verify-prereqs.sh created)
-- [x] P0-DEPLOY-002: Install OpenClaw CLI in container (Dockerfile updated)
-- [x] P0-DEPLOY-003: Standardize paths ATOMICALLY (/root/.openclaw → /home/node/.openclaw)
-- [x] P0-DEPLOY-004: Runtime env vars in .env.example
-- [x] P0-DEPLOY-005: deploy.sh with health checks
-- [x] P0-DEPLOY-006: Dual-process launcher (launcher.js created, CORE architectural fix)
-- [x] P0-DEPLOY-007: Local integration test (scripts/integration-test.sh created)
-- [x] P0-DEPLOY-008: Rollback procedure (scripts/rollback.sh and docs/ROLLBACK.md created)
 - **Status:** complete
 
 ### Phase 1: Pre-Deployment Verification
@@ -49,311 +42,148 @@ Deploy DonClaudioBot v2 to production Hetzner VPS (135.181.93.227) with health v
   WHY: Deploying without verification leads to hard-to-debug failures in production.
   MAPPED FROM: P0-DEPLOY-009 verification_steps
 -->
-- [x] Run ./scripts/verify-prereqs.sh (SSH, Docker, disk space, clean server state)
-- [x] Run ./scripts/integration-test.sh (local dress rehearsal - requires Docker daemon running)
-- [x] Verify .env has HOOK_TOKEN and GATEWAY_TOKEN set (generated via openssl)
-- [x] Document any blockers in findings.md (OpenClaw setup requirement documented)
 - **Status:** complete
 
 ### Phase 2: Deploy to Hetzner VPS
-- [x] Run ./scripts/deploy.sh (with health checks baked in)
-- [x] Initialize OpenClaw config: `ssh root@135.181.93.227 'docker exec don-claudio-bot npx openclaw setup'`
-- [x] Restart container to pick up config: `ssh root@135.181.93.227 'docker compose -f /root/don-claudio-bot/docker-compose.yml restart'`
-- [x] Fixed template schema: `gateway.token` → `gateway.auth.token`
-- [x] Set `gateway.mode = local` via `openclaw config set`
-- [x] Set `gateway.auth.token` via `openclaw config set`
-- [x] **FIXED:** Changed env var from `GATEWAY_TOKEN` to `OPENCLAW_GATEWAY_TOKEN` (root cause found via QMD research)
-- [x] **FIXED:** Removed `$schema` key and fixed `gateway.bind` format (`"ws://127.0.0.1:18789"` → `"lan"`)
-- [x] Destroyed corrupted volume: `docker volume rm docker_don-claudio-state`
-- [x] Rebuilt and redeployed with fresh volume
-- [x] Verify container running: `ssh -i ~/.ssh/hetzner root@135.181.93.227 'docker ps | grep don-claudio-bot | grep -q Up'` ✅
-- [x] Check health endpoint: `curl -f -s http://135.181.93.227:3000/health | jq -e '.status == "ok"'` ✅
-- [x] Verify volume created: `ssh -i ~/.ssh/hetzner root@135.181.93.227 'docker volume ls | grep don-claudio-state'` ✅
-- [x] Verify Gateway running: `curl -s http://localhost:18789/ | grep OpenClaw` ✅
-- **Status:** **COMPLETE** - Gateway and Onboarding both running successfully
-<!--
-  WHAT: Execute the deployment script and verify container is running.
-  WHY: This is the main deployment event. Health checks catch failures early.
-  MAPPED FROM: P0-DEPLOY-009 main deployment steps
+[x] Executed deploy.sh and initialized OpenClaw config via npx openclaw setup.
+[x] Fixed configuration schema: set gateway.bind to "lan", corrected auth tokens, and renamed env var to OPENCLAW_GATEWAY_TOKEN.
+[x] Resolved state corruption by destroying the volume and redeploying with a fresh state.
+[x] Restarted container to apply all configuration and schema fixes.
+[x] Verified Production Health: Container Up, Health Endpoint (200 OK), Volume created, and Gateway active.
 
-  UPDATED: Added post-deploy `openclaw setup` step (from OpenClaw docs research)
--->
-- [ ] Run ./scripts/deploy.sh (with health checks baked in)
-- [ ] Initialize OpenClaw config: `ssh root@135.181.93.227 'docker exec don-claudio-bot npx openclaw setup'`
-- [ ] Restart container to pick up config: `ssh root@135.181.93.227 'docker compose -f /root/don-claudio-bot/docker-compose.yml restart'`
-- [ ] Verify container running: `ssh -i ~/.ssh/hetzner root@135.181.93.227 'docker ps | grep don-claudio-bot | grep -q Up'`
-- [ ] Check health endpoint: `curl -f -s http://135.181.93.227:3000/health | jq -e '.status == "ok"'`
-- [ ] Verify volume created: `ssh -i ~/.ssh/hetzner root@135.181.93.227 'docker volume ls | grep don-claudio-state'`
-- [ ] Check logs: `ssh root@135.181.93.227 'cd /root/don-claudio-bot && docker compose logs -f --tail=50'`
-- **Status:** pending
+### Phase 3: WhatsApp Authentication — COMPLETE
+ SSH tunnel to Gateway UI (-L 18789)
+ Authenticated Gateway UI with token
+ Logged into WhatsApp channel, scanned QR
+ Credentials created (creds.json), channel linked (+12062274085)
 
-### Phase 3: WhatsApp Authentication
-<!--
-  WHAT: Authenticate WhatsApp channel through Gateway UI.
-  WHY: Without WhatsApp auth, the service cannot receive messages.
-  MAPPED FROM: P0-DEPLOY-009 post_deployment_steps
--->
-- [x] Set up SSH tunnel for Gateway UI: `ssh -i ~/.ssh/hetzner -N -L 18789:127.0.0.1:18789 root@135.181.93.227`
-- [x] Open browser: http://127.0.0.1:18789/
-- [x] Authenticate with GATEWAY_TOKEN from .env
-- [x] Navigate to Channels -> WhatsApp -> Login
-- [x] Scan QR code with phone
-- [x] Verify auth files exist: `ls -la /home/node/.openclaw/credentials/whatsapp/`
-- **Status:** **COMPLETE** - creds.json created, channel linked (+12062274085)
+### Phase 3a: Gateway UI Auth Fix — COMPLETE
+ Root causes: missing gateway.auth.mode=token + browser WebCrypto blocked over HTTP tunnel
+ Enabled gateway.controlUi.allowInsecureAuth=true
+ Set gateway auth + remote tokens via openclaw config set
+ UI accessible, Gateway reachable, dashboard URL valid
 
-### Phase 3a: Gateway UI Authentication (COMPLETE)
-<!--
-  WHAT: Fix Gateway Control UI browser authentication - token mismatch error.
-  WHY: Cannot access Gateway UI via browser to manage channels, agents, or config.
-  RESOLVED: 2026-02-04
--->
-**Root Causes (two compounding issues):**
-1. **Missing `gateway.auth.mode: "token"`** — non-loopback binds (`bind: "lan"`) require explicit auth mode
-2. **Missing `gateway.controlUi.allowInsecureAuth: true`** — SSH tunnel serves HTTP, browser blocks WebCrypto device identity generation in non-secure contexts, causing auth failure even with correct token
+### Phase 4: Sandbox Image Build — COMPLETE
+ Fixed sandbox Dockerfile (pinned gog CLI v0.9.0)
+ Fixed build script (paths + vars)
+ Built image locally + on Hetzner
+ Verified gog binary + version
+ Image size verified (495MB)
 
-**Fix Applied (runtime config via `openclaw config set`, no file changes):**
-```bash
-docker exec don-claudio-bot npx openclaw config set gateway.auth.mode token
-docker exec don-claudio-bot npx openclaw config set gateway.controlUi.allowInsecureAuth true
-docker exec don-claudio-bot npx openclaw config set gateway.auth.token "<token>"
-docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token>"
-```
-
-**Access URL:** `http://127.0.0.1:18790/?token=gGmp9ov9tx54pRmFHOcVeuG%2Fk1OdlR8EYpcnp40PeXY%3D`
-(via SSH tunnel: `ssh -i ~/.ssh/hetzner -N -L 18790:127.0.0.1:18789 root@135.181.93.227`)
-
-**Verification:**
-- [x] Browser UI opens without "disconnected" error
-- [x] `openclaw status` shows Gateway as "reachable" (24ms)
-- [x] `openclaw dashboard` prints tokenized URL correctly
-
-**Status:** **COMPLETE**
-
----
-
-### Phase 4: Sandbox Image Build
-<!--
-  WHAT: Build the sandbox image required for dedicated agent OAuth.
-  WHY: Onboarding agent doesn't need sandbox (mode='off'), but dedicated agents do.
-  MAPPED FROM: P1-DEPLOY-010
--->
-- [x] Verify config/sandbox/Dockerfile.sandbox exists
-- [x] Fixed Dockerfile: pinned gog CLI to v0.9.0 from steipete/gogcli (OpenClaw docs reference steipete/gog which 404s)
-- [x] Fixed build-sandbox.sh: proper variable expansion, auto-cd to project root
-- [x] Build image locally (linux/amd64 via buildx): `docker build --platform linux/amd64 -f config/sandbox/Dockerfile.sandbox -t openclaw-sandbox:bookworm-slim .`
-- [x] Build image on Hetzner directly: `docker build -f config/sandbox/Dockerfile.sandbox -t openclaw-sandbox:bookworm-slim .`
-- [x] Verify gog CLI: `docker run --rm --entrypoint /usr/local/bin/gog openclaw-sandbox:bookworm-slim --version` → v0.9.0
-- [x] Verify which gog: `/usr/local/bin/gog`
-- [x] Image size: 495MB (ID: 053b342741af)
-- **Status:** **COMPLETE**
-
-### Phase 5: Integration Testing (COMPLETE)
-<!--
-  WHAT: Test webhook endpoint and verify onboarding flow works.
-  WHY: Production deployment means nothing if the service doesn't work end-to-end.
-  MAPPED FROM: P0-DEPLOY-009 verification steps
--->
-- [x] **DISCOVERED:** Deployed code was OLD — still used `execFile`/`npx openclaw agents add` (interactive CLI). Local source already fixed to use `config-writer.js` (direct config editing). Root cause: previous deploys didn't rebuild the Docker image layer with new compiled JS.
-- [x] Redeployed with updated code — verified `/app/onboarding/dist/services/agent-creator.js` now uses `config-writer.js` imports (no `execFile`)
-- [x] Test webhook without token (expect 401): **PASSED** → `401 Unauthorized`, `{"error":"Missing authorization header"}`
-- [x] Test webhook with valid token: **FAILED 500** → SQLite error: `no such column: "now"`
-- [x] **ROOT CAUSE:** `state-manager.ts:61` used `datetime("now")` — double quotes = column identifier in SQLite. Schema.sql correctly uses `datetime('now')` with single quotes.
-- [x] **FIX APPLIED:** Changed line 61 from single-quoted JS string with double-quoted SQL to backtick template literal with single-quoted SQL: `` `...datetime('now', '+24 hours')` ``
-- [x] TypeScript compiled successfully after fix
-- [x] Redeployed with SQLite fix — verified `datetime('now')` in deployed JS ✅
-- [x] Verified deployed `agent-creator.js` uses `config-writer.js` imports ✅
-- [x] Test 2 re-run: **FAILED** — curl HTTP 000 (connection reset). Gateway was crashing, killed the onboarding process.
-- [x] **ROOT CAUSE #2:** Previous Test 2 (which hit SQLite error) had already written an agent to `openclaw.json` before the DB insert failed. That agent's config had 3 schema violations that crashed Gateway:
-  - `cpus: '0.5'` — string, OpenClaw expects number
-  - `pids_limit: 100` — snake_case, OpenClaw expects `pidsLimit` (camelCase)
-  - `timeoutMs: 30000` — not a valid sandbox-level key (only valid for browser config)
-- [x] **FIX APPLIED (agent-creator.ts):** Changed `cpus` to number `0.5`, `pids_limit` to `pidsLimit`, removed `timeoutMs` from sandbox config. Also removed stale `timeoutMs` check from `sandbox-validator.ts`.
-- [x] Removed bad agent (`user_7f0d3241ec4aae7a`) from live config via Node.js script
-- [x] Restarted container — Gateway starting with cleaned config
-- [x] **FINAL TEST (2026-02-04):** Redeployed with schema fix → webhook POST with valid token → **PASSED**
-  - Response: `{"status":"created","agentId":"user_7659f051911760f6","phone":"+15559998888"}`
-  - Container remained healthy (no Gateway crash)
-  - Agent config verified: `cpus: 0.5` (number), `pidsLimit: 100` (camelCase), no `timeoutMs`
-  - Gateway auto-reloaded config successfully
-- [x] Logs verified: `[webhook] Processing onboarding for phone: +15559998888` → `agent_created` with `success: true`
-- [x] Health check: `{"status":"ok"}`
-- [x] **BONUS FIX:** Discovered state.ts router wasn't mounted (GET /onboarding/state/:phone returned 404). Fixed: added import + mount in index.ts. Verified with 3 tests: container healthy, GET state returns DB row, POST update persists. ✅
-- **Status:** **COMPLETE** — All integration tests passed, onboarding flow working end-to-end, state API accessible
+### Phase 5: Integration Testing — COMPLETE
+ Discovered: deployed image used old interactive CLI code
+ Redeployed with config-writer.js (no execFile)
+ Webhook auth tests: 401 OK, 500 SQLite error found
+ Root cause: SQLite datetime("now") (wrong quotes)
+ Fixed to datetime('now'), redeployed
+ Gateway crash traced to invalid agent schema
+ Fixed agent config (cpus number, pidsLimit, removed timeoutMs)
+ Removed corrupted agent, restarted Gateway
+ Final test: webhook PASSED, agent created, Gateway stable
+ Bonus fix: mounted state router, GET/POST verified
+Status: ALL PHASES COMPLETE — end-to-end onboarding fully operational
 
 ### Phase 6: Documentation & Handoff (COMPLETE - PRODUCTION APPROVED)
-<!--
-  WHAT: Document deployment results and create handoff notes.
-  WHY: Future you (or others) need to know what was done and how to verify it.
--->
-- [x] Update tasks_plan.md with completion status
-- [x] Document deployment timestamp in progress.md (2026-02-04 session entry)
-- [x] Create post-deployment verification checklist
-- [x] Document any deviations from plan in findings.md (Patterns 16-23)
-- [x] **Fix 1:** Reconciliation CLI entry point (reconciliation-cli.ts created, cron-setup.sh updated)
-- [x] **Fix 2:** Baileys sidecar enabled (BAILEYS_SIDECAR_ENABLED=true, fixed auth loading)
-- [x] Production readiness analysis: 5 concurrent onboardings + 2 active users = ~4.5GB RAM (fits CX32 8GB)
-- [x] fs.watch() risk accepted: chokidar has awaitWriteFinish for atomic renames, cron serves as safety net
-- **Status:** **COMPLETE — PRODUCTION LIVE 🚀**
+<!-- WHAT: Document deployment results and handoff notes. WHY: Ensure future verification and maintainability. -->
+ Update tasks_plan.md and progress.md (2026-02-04)
+ Create post-deployment verification checklist
+ Document deviations in findings.md (Patterns 16-23)
+ Fix 1: Reconciliation CLI entry point (reconciliation-cli.ts, cron-setup.sh)
+ Fix 2: Baileys sidecar enabled (BAILEYS_SIDECAR_ENABLED, auth fix)
+ Production readiness: ~4.5GB RAM usage fits CX32 (8GB)
+ fs.watch() risk accepted (chokidar + cron safety net)
+Status: COMPLETE — PRODUCTION LIVE 🚀
 
 ### Phase 7: Spanish "Don Claudio" Agent Templates (COMPLETE)
-<!--
-  WHAT: Create Spanish-language agent template files for new users.
-  WHY: Currently new agents get EMPTY workspaces - no AGENTS.md/SOUL.md/MEMORY.md.
--->
-- [x] Create `config/agents/dedicated-es/AGENTS.md` - Spanish instructions for Don Claudio assistant
-- [x] Create `config/agents/dedicated-es/SOUL.md` - Spanish personality, tone, behavioral guidelines
-- [x] Create `config/agents/dedicated-es/MEMORY.md` - Spanish memory structure with user fields
-- [x] Update `agent-creator.ts` to copy templates to `workspace-<id>/` on agent creation
-- [x] Test that template files are copied correctly to new agent workspaces
-- **Status:** **COMPLETE** — Spanish "Don Claudio" templates created, template copying implemented
+<!-- WHAT: Spanish-language agent templates for new users. WHY: Prevent empty workspaces on agent creation. -->
+ Create Spanish AGENTS.md, SOUL.md, MEMORY.md templates
+ Update agent-creator.ts to copy templates on creation
+ Verify templates copied to new workspaces
+Status: COMPLETE — Spanish templates live and functional
 
 ### Phase 8: Two-Phase Onboarding & Variable Collection (COMPLETE)
-<!--
-  WHAT: Implement follow-up conversation to collect user details (name, email) after agent creation.
-  WHY: Currently agents are created with phone number only - no user info collected.
--->
-- [x] **CRITICAL:** Research `workspaceAccess` permissions - changed from `ro` to `rw` to enable memory writes
-- [x] Design conversational flow for agent to request name/email after first message
-- [x] Implement agent-side conversation handler for variable collection (via MEMORY.md onboarding instructions)
-- [x] Update memory files with collected user data (name, email)
-- [x] Test two-phase flow: phone → agent creation → conversation → data collection
-- [x] Ensure users can edit their AGENTS.md/SOUL.md/MEMORY.md files (write permissions enabled)
-- **Status:** **COMPLETE** — workspaceAccess changed to 'rw', MEMORY.md includes onboarding prompt for agents
+<!-- WHAT: Collect user name/email after agent creation. WHY: Agents previously created with phone number only. -->
+
+ CRITICAL: Change workspaceAccess from ro → rw
+ Design and implement conversational data collection flow
+ Persist name/email into MEMORY.md
+ End-to-end test: phone → agent → conversation → data
+ Enable user edits to AGENTS.md/SOUL.md/MEMORY.md
+Status: COMPLETE — Two-phase onboarding operational
 
 ### Phase 9: Google OAuth Credential Setup & Per-User Auth Flow
-<!--
-  WHAT: Configure shared OAuth client credentials and implement per-user Google authorization flow.
-  WHY: Agents need access to Gmail/Calendar via gogcli, but credentials storage and user auth flow not yet implemented.
+<!-- WHAT: Shared OAuth client + per-user Google authorization. WHY: Enable Gmail/Calendar access via gogcli. -->
+Requirements
 
-  PREREQUISITES:
-  - Google Cloud project created with OAuth client (client_secret_*.json in config/)
-  - Gmail + Calendar APIs enabled
-  - OAuth consent screen configured (Testing mode for <100 users)
+ Shared OAuth client credentials (secure, sandbox-accessible)
+ Per-agent isolated Google tokens (GOG_CONFIG_DIR)
+ WhatsApp-driven manual OAuth flow
+ No credential leakage (repo/log safety)
+ Idempotent setup
 
-  REFERENCES:
-  - gogcli quickstart: https://github.com/steipete/gogcli (README Quick Start section)
-  - OpenClaw sandbox env injection: gateway/sandboxing.md (Sandboxed skills + env vars)
-  - OpenClaw skills system: tools/skills.md (Environment injection per agent run)
-  - Current agent env setup: onboarding/src/services/agent-creator.ts lines 71-75
--->
+Implementation Tasks
 
-#### Requirements
-- [ ] **R1: Shared OAuth client credentials** stored securely and accessible to all sandboxes
-- [ ] **R2: Per-user Google OAuth tokens** isolated by agent (GOG_CONFIG_DIR per phone number)
-- [ ] **R3: User-friendly auth flow** via WhatsApp conversation (agent guides user through manual OAuth)
-- [ ] **R4: Credential security** - client_secret not committed to repo, not exposed in logs
-- [ ] **R5: Idempotent setup** - credentials can be re-run without breaking existing tokens
+Task 1: Credential Storage
+ Chosen: Bind mount host ./config → sandbox /credentials (RO)
+ Rejected: Baking credentials into image
 
-#### Implementation Tasks
+Task 2: Docker Compose Update
+ Add read-only bind mount:
 
-**Task 1: Credential Storage Design**
-- [ ] Decision: Mount host config directory into sandbox (docker bind mount)
-- [ ] Alternative: Bake credentials into sandbox image (less secure - REJECTED)
-- [ ] Chosen approach: Bind mount `/app/config` on host → `/credentials` in sandbox
-- [ ] Benefits: Credentials managed outside image, easy to update, isolated from workspace
+volumes:
+  - don-claudio-state:/home/node/.openclaw
+  - ./config:/credentials:ro
 
-**Task 2: Update Docker Compose with Credential Mount**
-- [ ] Add bind mount to `docker/docker-compose.yml`:
-  ```yaml
-  volumes:
-    - don-claudio-state:/home/node/.openclaw
-    - ./config:/credentials:ro  # NEW: Read-only mount for OAuth credentials
-  ```
-- [ ] Security: Read-only mount prevents sandboxes from modifying credentials
-- [ ] Path: Host `./config/client_secret_*.json` → Container `/credentials/client_secret_*.json`
 
-**Task 3: Update Sandbox Environment Variables**
-- [ ] Add `GOG_CREDENTIALS_PATH` to agent-creator.ts sandbox env:
-  ```typescript
-  env: {
-    GOG_KEYRING_PASSWORD: randomBytes(32).toString('base64url'),
-    GOG_CONFIG_DIR: `/home/node/.gog/plus_${phoneNumber.replace('+', '')}`,
-    GOG_CREDENTIALS_PATH: '/credentials',  // NEW: Shared credentials location
-  }
-  ```
-- [ ] Verify: gog respects `GOG_CREDENTIALS_PATH` or uses default location
-- [ ] Fallback: If env var not supported, use symlink in setupCommand
+Task 3: Sandbox Environment
 
-**Task 4: One-Time Credential Setup**
-- [ ] Create `scripts/setup-google-credentials.sh`:
-  ```bash
-  #!/bin/bash
-  # Run once after deployment to configure gog with OAuth client
-  docker exec don-claudio-bot gog auth credentials /credentials/client_secret_*.json
-  ```
-- [ ] Security: Container restart does NOT require re-running (credentials persist in volume)
-- [ ] Verification: `gog auth credentials list` should show the stored client
+ Add env vars:
 
-**Task 5: Per-User OAuth Flow (Agent-Side)**
-- [ ] Update `config/agents/dedicated-es/MEMORY.md` with Google OAuth instructions
-- [ ] Agent detects if `GOG_CONFIG_DIR` has valid tokens (check via `gog auth list`)
-- [ ] If no tokens, agent guides user through manual OAuth:
-  ```
-  1. Agent runs: gog auth add <user_email> --manual
-  2. gog outputs OAuth URL (user copies to their browser)
-  3. User authorizes in browser, gets auth code
-  4. User pastes code back to WhatsApp
-  5. Agent completes auth with code
-  ```
-- [ ] Security: `--manual` mode works in headless sandbox (no browser required)
+GOG_KEYRING_PASSWORD
+GOG_CONFIG_DIR
+GOG_CREDENTIALS_PATH=/credentials
+ Fallback via symlink if unsupported
 
-**Task 6: Update Spanish Template with OAuth Instructions**
-- [ ] Add "🔐 Google OAuth" section to `config/agents/dedicated-es/MEMORY.md`
-- [ ] Include step-by-step instructions for user to authorize Google account
-- [ ] Add troubleshooting: "Si no puedes acceder a Gmail/Calendario..."
+Task 4: One-Time Credential Setup
+ Create setup-google-credentials.sh
+ Verify via gog auth credentials list
 
-#### Verification Steps
+Task 5: Per-User OAuth Flow
+ Agent checks for tokens
+ If missing, guides user through gog auth add --manual
+ OAuth completed via WhatsApp (headless-safe)
 
-**Test 1: Credential Mount Verification**
-- [ ] Deploy updated docker-compose.yml with bind mount
-- [ ] SSH into container: `docker exec don-claudio-bot ls -la /credentials/`
-- [ ] Verify: `client_secret_*.json` is visible and readable
+Task 6: Spanish Template Update
+ Add "🔐 Google OAuth" section to MEMORY.md
+ Include steps + troubleshooting
 
-**Test 2: One-Time Credential Setup**
-- [ ] Run `./scripts/setup-google-credentials.sh`
-- [ ] Verify: `docker exec don-claudio-bot gog auth credentials list` shows client
-- [ ] Check output contains: `client_secret_*.apps.googleusercontent.com`
+Verification Steps
+ Verify /credentials mount visibility
+ Confirm OAuth client registration
+ Manual OAuth flow validation
+ Gmail/Calendar command access
+ Token isolation across agents
 
-**Test 3: Per-User OAuth Flow (Manual Test)**
-- [ ] Send WhatsApp message to trigger onboarding
-- [ ] Agent responds with welcome message + OAuth instructions
-- [ ] Simulate user: run `gog auth add test@example.com --manual` in container
-- [ ] Copy OAuth URL, verify it points to Google consent screen
-- [ ] (Skip actual auth in test - just verify flow works)
+Success Criteria
+ OAuth client accessible in sandbox
+ gog credentials registered once
+ Agents complete manual OAuth
+ Gmail/Calendar access confirmed
+ Tokens isolated per agent
+ No secrets committed to git
 
-**Test 4: Agent Can Access gog Commands**
-- [ ] After auth, test: `gog gmail labels list` returns user's labels
-- [ ] Test: `gog calendar calendars` returns user's calendars
-- [ ] Verify: No errors about missing credentials or tokens
+Security Considerations
+ Read-only credential mount
+ Unique per-agent keyrings
+ Optional post-auth network hardening
+ Audit logging for OAuth events
 
-**Test 5: Token Isolation Between Users**
-- [ ] Create two agents with different phone numbers
-- [ ] Authorize different Google accounts for each
-- [ ] Verify: Agent A cannot access Agent B's Google data
-- [ ] Verify: Different `GOG_CONFIG_DIR` paths per agent
-
-#### Success Criteria
-- [ ] OAuth client credentials accessible from sandbox (bind mount verified)
-- [ ] `gog auth credentials` run successfully (stored in container state)
-- [ ] Agent can guide user through `--manual` OAuth flow (instructions in MEMORY.md)
-- [ ] Authorized agents can access Gmail/Calendar via gog commands
-- [ ] Tokens are isolated per agent (different GOG_CONFIG_DIR)
-- [ ] No credentials committed to git repository (config/ in .gitignore)
-
-#### Security Considerations
-- [ ] **Credential file**: `config/client_secret_*.json` already exists (DO NOT commit)
-- [ ] **Read-only mount**: Sandboxes can read but not modify credentials
-- [ ] **Per-user tokens**: Each agent has unique `GOG_KEYRING_PASSWORD`
-- [ ] **Network isolation**: Sandbox network is `bridge` (required for OAuth), consider `none` after auth
-- [ ] **Audit logging**: Log Google auth events in audit-logger.ts (OPSEC consideration)
-
-#### Rollback Plan
-- [ ] If bind mount fails: Revert docker-compose.yml, use volume copy instead
-- [ ] If env vars don't work: Use setupCommand to symlink credentials to default path
-- [ ] If OAuth flow breaks: Agent can fall back to asking user to run manual auth command via SSH
-- [ ] If tokens leak: Revoke via Google Cloud Console, re-run auth flow
-
-**Status:** **COMPLETE** — Deployed and verified (2026-02-05)
+Rollback Plan
+ Revert bind mount if needed
+ Symlink credentials as fallback
+ Manual SSH auth as last resort
+ Revoke tokens via Google Console if compromised
+Status: COMPLETE — Deployed and verified (2026-02-05)
 
 ### Phase 10: Multi-Language Agent Templates & Phone-Based Routing
 <!--
@@ -373,31 +203,6 @@ docker exec don-claudio-bot npx openclaw config set gateway.remote.token "<token
 - [ ] **R3: Template selection logic** in agent-creator.ts based on phone number
 - [ ] **R4: Default fallback language** for unmapped countries (Spanish = current default)
 - [ ] **R5: Graceful degradation** - missing templates log warning but don't fail
-
-#### Design Decisions
-
-**Decision 1: Mapping Format**
-- Chosen: Simple JSON config file `config/phone-language-map.json`
-- Rejected: Database table (overkill), env var (not scalable), code switch (not maintainable)
-- Rationale: JSON is easy to edit, version control, no migration needed
-
-**Decision 2: Default Language**
-- Chosen: Spanish (es) as default
-- Rationale: Current system is Spanish-first, matches Chile origin
-
-**Decision 3: Template Folder Structure**
-```
-config/agents/
-├── dedicated-en/     # NEW: English templates (+1, +44, etc)
-│   ├── AGENTS.md
-│   ├── SOUL.md
-│   └── MEMORY.md
-├── dedicated-es/     # EXISTING: Spanish templates (+56, default)
-│   ├── AGENTS.md
-│   ├── SOUL.md
-│   └── MEMORY.md
-└── phone-language-map.json  # NEW: Mapping config
-```
 
 #### Implementation Tasks
 
@@ -485,158 +290,6 @@ config/agents/
   Acceptable tradeoff: First message might be dropped, but no "stuck in wrong agent" problem.
 -->
 
-**Subtask 0.1: Remove onboarding agent from config template**
-- [ ] Edit `config/openclaw.json.template`:
-  - Remove entire "onboarding" agent from `agents.list[]` array
-  - Remove `default: true` from all agents (no catch-all agent)
-  - Remove channel-level binding for "onboarding" from `bindings[]` array
-  - Verify `session.dmScope: "per-channel-peer"` is still set
-- [ ] Result: Template has NO default agent, only per-peer bindings (created dynamically)
-
-**Subtask 0.2: Remove onboarding template files**
-- [ ] Delete `config/agents/onboarding/` directory entirely:
-  - AGENTS.md (placeholder)
-  - SOUL.md (placeholder)
-  - MEMORY.md (intentionally empty)
-- [ ] Rationale: These are placeholders, never used, misleading to keep
-
-**Subtask 0.3: Update documentation**
-- [ ] Update ARCHITECTURE_REPORT.md:
-  - Add section "Why No Onboarding Agent?" with race condition explanation
-  - Document session key format: agent:<agentId>:whatsapp:dm:<peerId>
-  - Reference QMD MCP: openclaw-reference/concepts/session.md
-  - Explain "sticky session" problem and why removal is correct
-- [ ] Update findings.md: Document pattern about OpenClaw sessions
-- [ ] Add to .gitignore if needed: No changes needed
-
-**Subtask 0.4: Verification (MUST PASS)**
-- [ ] Verify template has no "default": true agents
-- [ ] Verify template has no channel-level bindings (only peer-specific ones)
-- [ ] Test: npx openclaw config validate config/openclaw.json.template passes
-- [ ] Document: First message may be dropped if webhook is slow
-- [ ] Document: Users will naturally retry, no action needed
-
-**Subtask 0.5: Production deployment notes**
-- [ ] Existing production agents are NOT affected (already have bindings)
-- [ ] Only affects NEW users (no binding exists yet)
-- [ ] No migration needed (onboarding agent was never used in production)
-- [ ] WhatsApp auth persists in volume (not affected)
-
-**Success Criteria:**
-- [ ] Template has zero agents with "default": true
-- [ ] Template has zero channel-level bindings (only peer bindings)
-- [ ] npx openclaw config validate passes
-- [ ] Documentation explains "sticky session" problem
-- [ ] Future agents reading this understand WHY onboarding agent was removed
-
-**References for future agents:**
-- QMD MCP search: "session sticky routing dmScope per-channel-peer"
-- QMD MCP search: "session key format agent dmScope isolated"
-- OpenClaw docs: openclaw-reference/concepts/session.md (read this!)
-- Clawd4All analysis: Clawd4All/onboarding-issues-summary.md (v1 lessons learned)
-
----
-
-**Task 1: Create phone-language-map.json**
-- [ ] Create `config/phone-language-map.json`:
-  ```json
-  {
-    "description": "Maps phone country codes to template language folders. Add new languages as: \"<country_code>\": \"dedicated-<lang>\"",
-    "default": "dedicated-es",
-    "mappings": {
-      "1": "dedicated-en",
-      "44": "dedicated-en",
-      "56": "dedicated-es",
-      "61": "dedicated-en",
-      "91": "dedicated-en"
-    }
-  }
-  ```
-- [ ] Add comments explaining format
-- [ ] Document in ARCHITECTURE_REPORT.md
-
-**Task 2: Create English Templates (dedicated-en/)**
-- [ ] Create `config/agents/dedicated-en/AGENTS.md`:
-  - Same structure as dedicated-es
-  - English instructions for Gmail/Calendar/productivity
-  - Variables: {{USER_NAME}}, {{USER_EMAIL}}, {{PHONE_NUMBER}}
-- [ ] Create `config/agents/dedicated-en/SOUL.md`:
-  - Personality: Professional but warm (like Don Claudio but English)
-  - Agent name: "Mr Botly" (avoids copyright, friendly)
-  - Tone: Concise, proactive, courteous
-- [ ] Create `config/agents/dedicated-en/MEMORY.md`:
-  - User data structure
-  - Onboarding flow (same placeholder detection as Spanish)
-  - English welcome message
-
-**Task 3: Language Detection Function**
-- [ ] Create `onboarding/src/lib/language-detector.ts`:
-  ```typescript
-  export function detectLanguage(phone: string): string {
-    // Extract country code: +1555... → "1"
-    // Read phone-language-map.json
-    // Return mapped folder or default
-  }
-  ```
-- [ ] Unit tests: +1 → dedicated-en, +56 → dedicated-es, +999 → default
-- [ ] Handle edge cases: malformed phone, missing config
-
-**Task 4: Update agent-creator.ts**
-- [ ] Import detectLanguage function
-- [ ] Replace line 102 hardcoded 'dedicated-es' with:
-  ```typescript
-  const { detectLanguage } = await import('../lib/language-detector.js');
-  const languageFolder = detectLanguage(phoneNumber);
-  const templateDir = join(process.cwd(), 'config', 'agents', languageFolder);
-  ```
-- [ ] Add log message: `[agent-creator] Using template: ${languageFolder} for ${phoneNumber}`
-- [ ] Verify graceful degradation (existing try/catch handles missing templates)
-
-**Task 5: Documentation Updates**
-- [ ] Update ARCHITECTURE_REPORT.md:
-  - Add section "Language & Template Routing"
-  - Document phone-language-map.json format
-  - Add to "Project Structure" section
-- [ ] Update task_plan.md: Mark Phase 10 tasks as above
-- [ ] Add to .gitignore: `config/phone-language-map.json` if it contains sensitive info (not needed - just country codes)
-
-#### Verification Steps
-
-**Test 1: English User (+1)**
-- [ ] Trigger onboarding with phone +15551234567
-- [ ] Verify log: "Using template: dedicated-en"
-- [ ] Check agent workspace: AGENTS.md is English
-- [ ] Send first message: Agent responds in English
-
-**Test 2: Spanish User (+56)**
-- [ ] Trigger onboarding with phone +56912345678
-- [ ] Verify log: "Using template: dedicated-es"
-- [ ] Check agent workspace: AGENTS.md is Spanish
-- [ ] Send first message: Agent responds in Spanish
-
-**Test 3: Unmapped Country (uses default)**
-- [ ] Trigger onboarding with phone +99999999999
-- [ ] Verify log: "Using template: dedicated-es" (default)
-- [ ] Check agent workspace: Spanish templates used
-
-**Test 4: Invalid/Missing Config**
-- [ ] Delete phone-language-map.json temporarily
-- [ ] Trigger onboarding
-- [ ] Verify: Falls back to default, logs warning, doesn't crash
-
-**Test 5: TypeScript Compilation**
-- [ ] npm run build succeeds
-- [ ] No type errors in language-detector.ts
-- [ ] agent-creator.ts imports work correctly
-
-#### Success Criteria
-- [ ] +1 phone numbers get English templates
-- [ ] +56 phone numbers get Spanish templates
-- [ ] Unmapped countries get Spanish default
-- [ ] Config file addition requires no code changes
-- [ ] Missing config file doesn't crash onboarding
-- [ ] All existing functionality preserved
-
 #### Future Extensibility
 To add a new language (e.g., Portuguese for +55 Brazil):
 1. Create `config/agents/dedicated-pt/` folder with templates
@@ -682,38 +335,14 @@ To add a new language (e.g., Portuguese for +55 Brazil):
 #### Implementation Tasks
 
 **Task 1: Fix bind mount target path**
-- [ ] Change bind in `agent-creator.ts` from:
-  `/root/google-credentials/credentials.json:/home/node/.config/gogcli/credentials.json:ro`
-  to:
-  `/root/google-credentials/credentials.json:/root/.config/gogcli/credentials.json:ro`
-- [ ] Update live config on server with new bind path
-- [ ] Recreate sandbox to pick up new bind
-
 **Task 2: Investigate and fix env var injection**
-- [ ] Check OpenClaw version for known bugs with per-agent `sandbox.docker.env`
-- [ ] Try workaround: move env vars to `agents.defaults.sandbox.docker.env` (but these are per-user values...)
-- [ ] Alternative workaround: bake env vars into `setupCommand` or use a wrapper script
-- [ ] Alternative workaround: set env vars via the sandbox image itself
-- [ ] If OpenClaw bug: file issue or find workaround
-
 **Task 3: Recreate sandbox and verify**
-- [ ] `openclaw sandbox recreate --agent user_405bf6b6cf0f1a4f`
-- [ ] Verify `docker inspect` shows env vars
-- [ ] Verify `docker exec ... gog auth status` shows correct config_path and keyring_backend
-- [ ] Verify credentials.json is found by gog
-- [ ] Test `gog auth add juanpablodlc@gmail.com --manual` works inside sandbox
-
 **Task 4: Backport server-only changes to repo** (from earlier session)
-- [ ] `docker-compose.yml`: add `group_add: ["988"]`, `DOCKER_API_VERSION=1.44`
-- [ ] `Dockerfile.sandbox`: ENTRYPOINT removal already in local repo
-- [ ] Document `BAILEYS_SIDECAR_ENABLED=false` in .env.example
-
 #### Verification
 - [ ] `gog auth status` inside sandbox shows correct paths
 - [ ] `gog auth add <email> --manual` outputs OAuth URL
 - [ ] User can complete OAuth flow via WhatsApp conversation
 - [ ] Tokens stored in isolated per-agent directory
-
 **Status:** **COMPLETE** (2026-02-05) — Workaround implemented for OpenClaw bug, server changes backported to repo
 
 **Implementation Summary:**
@@ -785,85 +414,9 @@ User sends WhatsApp message
 #### Implementation Tasks
 
 **Task 1: Create the production plugin**
-Verify: `ls config/extensions/onboarding-hook/` → `index.ts  openclaw.plugin.json`
-
-Create `config/extensions/onboarding-hook/openclaw.plugin.json`:
-```json
-{"id":"onboarding-hook","configSchema":{}}
-```
-
-Create `config/extensions/onboarding-hook/index.ts`:
-```typescript
-// In-memory cache — prevents HTTP call on every message from known users
-const knownPhones = new Set<string>();
-
-const ONBOARDING_URL = process.env.ONBOARDING_WEBHOOK_URL || "http://localhost:3000/webhook/onboarding";
-const HOOK_TOKEN = process.env.HOOK_TOKEN || "";
-
-export default function register(api: any) {
-  api.on("message_received", async (event: any, ctx: any) => {
-    if (ctx.channelId !== "whatsapp") return;
-    const phone = event.metadata?.senderE164;
-    if (!phone || knownPhones.has(phone)) return;
-
-    // Webhook is idempotent (SQLite UNIQUE), duplicate calls safe
-    try {
-      const resp = await fetch(ONBOARDING_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${HOOK_TOKEN}`,
-        },
-        body: JSON.stringify({ phone }),
-      });
-
-      if (resp.ok) {
-        const data = await resp.json();
-        knownPhones.add(phone);
-        api.logger?.info?.(`[onboarding-hook] ${data.status}: ${phone} → ${data.agentId || "existing"}`);
-      } else if (resp.status === 409) {
-        knownPhones.add(phone);
-      } else {
-        api.logger?.warn?.(`[onboarding-hook] Webhook returned ${resp.status} for ${phone}`);
-      }
-    } catch (err) {
-      api.logger?.error?.(`[onboarding-hook] Failed for ${phone}: ${err}`);
-    }
-  });
-}
-```
-
 **Task 2: Dockerfile + entrypoint (get plugin into volume)**
-Verify: `docker build` succeeds; `grep onboarding-hook docker/docker-entrypoint.sh` shows copy block.
-
-Volume mount overrides image-layer files. Stage in image, copy to volume via entrypoint.
-
-Dockerfile — add after `COPY config ./config` (line 38):
-```dockerfile
-COPY config/extensions /app/config/extensions
-```
-
-Entrypoint (`docker/docker-entrypoint.sh`) — add BEFORE the final "Starting" echo (line 82, after welcome agent setup):
-```bash
-if [ ! -f "/home/node/.openclaw/extensions/onboarding-hook/openclaw.plugin.json" ]; then
-  mkdir -p /home/node/.openclaw/extensions/onboarding-hook
-  cp /app/config/extensions/onboarding-hook/* /home/node/.openclaw/extensions/onboarding-hook/
-  echo "[entrypoint] Installed onboarding-hook plugin"
-fi
-```
-
 **Task 3: Remove session watcher from Onboarding Service**
-Verify: `npm run build` succeeds; `grep -c sessionWatcher onboarding/dist/index.js` → `0`
-
-Edit `onboarding/src/index.ts`:
-- Remove: `import { startSessionWatcher } from './services/session-watcher.js';` (line 8)
-- Remove: `startSessionWatcher();` (line 38)
-- Keep `session-watcher.ts` file as rollback reference until verified in production.
-
 **Task 4: Update documentation**
-
-Update `ARCHITECTURE_REPORT.md` (Sections 3, 4, 5, 7, 10, 12), `progress.md`, project `MEMORY.md`.
-Clean up test plugin from server: `docker exec don-claudio-bot rm -rf /home/node/.openclaw/extensions/message-test /tmp/message-received.log`
 
 #### Verification Steps
 
@@ -871,22 +424,6 @@ Clean up test plugin from server: `docker exec don-claudio-bot rm -rf /home/node
 - [ ] `./scripts/deploy.sh`
 - [ ] Plugin loaded: `docker exec don-claudio-bot npx openclaw plugins list | grep onboarding-hook` → `loaded`
 - [ ] Session watcher NOT running: no `[session-watcher] Starting` in logs
-
-**Functional (real WhatsApp messages):**
-- [ ] KNOWN user message → routes to dedicated agent, no webhook call in logs
-- [ ] UNKNOWN user message → plugin calls webhook → agent created → SIGUSR1 → gateway restart → second message routes to new agent
-
-**Regression:**
-- [ ] Existing users still route correctly
-- [ ] Welcome Agent still responds on first message from new user
-
-#### Rollback Plan
-
-1. Remove plugin: `docker exec don-claudio-bot rm -rf /home/node/.openclaw/extensions/onboarding-hook`
-2. Re-add `startSessionWatcher()` in `index.ts`, rebuild, redeploy
-3. `docker exec don-claudio-bot kill -USR1 1` — session watcher resumes in 5s
-
-Rollback is safe: both session watcher and plugin call the same idempotent webhook.
 
 #### Known Limitations (Unchanged)
 
@@ -1001,6 +538,306 @@ DeepWiki (2026-02-07) claims "bindings related to channels should be picked up w
 
 ---
 
+### Phase 14: Disable Slash Commands for WhatsApp User Agents
+<!--
+  WHAT: Fully disable slash command parsing for end users on WhatsApp.
+  WHY: Users can use `/model`, `/think` (cost risk), `/status` (info leak), `/reset` (UX disruption).
+       Dangerous commands are already blocked by defaults/sandbox, but benign-but-undesirable ones remain.
+  APPROACH: Dockerfile patch (immediate) + upstream PR (proper fix).
+-->
+
+#### Context
+
+Users assigned to DonClaudioBot agents on WhatsApp can use OpenClaw slash commands (`/status`, `/model`, `/think`, etc.). While dangerous commands (`/elevated`, `/bash`, `/config`, `/restart`) are already blocked by defaults and sandbox gates, benign-but-undesirable commands remain available. The goal is to fully disable slash command parsing for end users on WhatsApp.
+
+#### Problem
+
+**`commands.text: false` does not work on WhatsApp.** This is hardcoded in OpenClaw's `shouldHandleTextCommands` function — it always returns `true` for channels without native command support (WhatsApp, WebChat, Signal, iMessage, Google Chat, MS Teams). Unit tests enforce this behavior.
+
+OpenClaw's rationale: WhatsApp has no native command UI, so text commands are the only control surface. Disabling them would remove all admin access.
+
+**`allowFrom` can't separate messaging from command auth.** With `allowFrom: ["*"]` (required for our open-access setup), all senders are authorized for commands. `dmPolicy: "open"` also requires `allowFrom: ["*"]`, so there's no way to decouple them.
+
+#### Current Risk Surface
+
+| Command | Status | Risk |
+|---------|--------|------|
+| `/elevated` | **Blocked** (sandbox + allowFrom gates) | None |
+| `/bash` | **Blocked** (disabled by default) | None |
+| `/config` | **Blocked** (disabled by default) | None |
+| `/restart` | **Blocked** (disabled by default) | None |
+| `/model <name>` | **Available** | Cost — users can switch to expensive models |
+| `/think <level>` | **Available** | Cost — users can increase thinking level |
+| `/status` | **Available** | Info leak — reveals internal config details |
+| `/reset` / `/new` | **Available** | UX — user loses session context |
+| `/help`, `/commands` | **Available** | Low — informational |
+| `/whoami`, `/id` | **Available** | Low — shows sender ID |
+| `/verbose`, `/reasoning` | **Available** | Low — changes output format |
+| `/queue` | **Available** | Low — changes queue mode |
+| `/usage` | **Available** | Low — shows usage stats |
+| `/compact` | **Available** | Low — triggers context compaction |
+
+#### Implementation: Option 1 — Dockerfile Patch (Immediate Fix)
+
+Patch `shouldHandleTextCommands` in the built JS at Docker build time, same approach as the bindings hot-reload patch (Phase 13).
+
+**How it works:**
+- Find the `shouldHandleTextCommands` function in the compiled OpenClaw JS
+- Patch it in the Dockerfile `RUN` step to return `false` for WhatsApp when `commands.text` is `false`
+- Then set `channels.whatsapp.commands.text: false` in `openclaw.json.template`
+
+**References:**
+- `shouldHandleTextCommands` — `src/auto-reply/commands-registry.ts` (or compiled equivalent)
+- Test: `src/auto-reply/commands-registry.test.ts` — asserts `true` for WhatsApp when `text: false`
+- Existing patch precedent: bindings hot-reload in `docker/Dockerfile`
+
+**Risk:** If we disable ALL text commands on WhatsApp, the bot owner also loses `/status`, `/model`, etc. access via WhatsApp. Admin actions would need SSH or the control UI.
+
+#### Implementation: Option 2 — Upstream PR (Proper Fix)
+
+Submit a PR to `openclaw/openclaw` that makes `channels.<provider>.commands.text` a true per-channel override that takes precedence over the "no native commands" fallback.
+
+**Proposed behavior:**
+- If `channels.whatsapp.commands.text` is explicitly set to `false`, honor it (don't override)
+- If not set, keep current behavior (fallback to `true` for channels without native commands)
+
+**PR scope:**
+1. Modify `shouldHandleTextCommands` to check channel-level `commands.text` override
+2. Update tests in `commands-registry.test.ts`
+3. Update docs in `tools/slash-commands.md`
+
+#### Implementation Steps
+
+1. Locate `shouldHandleTextCommands` in compiled OpenClaw JS inside `node_modules/openclaw/`
+2. Write a `sed`/`node` patch in `docker/Dockerfile` (after the existing bindings patch)
+3. Add `commands: { text: false, native: false }` to `channels.whatsapp` in `openclaw.json.template`
+4. Test locally with `docker compose up`
+5. Verify: send `/status` from a user phone → should be treated as plain text, not a command
+6. Deploy to Hetzner
+7. Draft upstream PR for `openclaw/openclaw`
+
+#### Verification
+
+- [ ] Send `/status` via WhatsApp → agent should respond to it as regular text (not a status report)
+- [ ] Send `/model gpt-5` via WhatsApp → agent should respond to it as regular text (not switch models)
+- [ ] Send `/think high` via WhatsApp → no acknowledgment, treated as plain text
+- [ ] Gateway control UI still works for admin operations
+
+#### Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Do both: Option 1 now + Option 2 in parallel** | Immediate protection via Dockerfile patch + proper upstream fix for long-term |
+| **Accept losing admin WhatsApp commands** | Admin operations rarely needed via WhatsApp chat. Use Gateway control UI or SSH instead. |
+| **Proven patch pattern** | Same approach as bindings hot-reload patch (Phase 13) — reliable, survives rebuilds |
+
+**Status:** pending
+
+---
+
+### Phase 15: Seamless WhatsApp OAuth Flow (No Localhost, No Test Users)
+<!--
+  WHAT: Replace the broken `gog auth add --manual` OAuth flow with a tap-to-authenticate HTTPS callback flow.
+  WHY: Two problems: (1) Google project WAS in Testing mode (100-user cap, 7-day token expiry) — NOW PUBLISHED TO PRODUCTION.
+       (2) `--manual` uses `http://localhost:1` redirect URI — on mobile this lands on broken page, requires
+       users to copy URL from browser address bar and paste back into WhatsApp. Confusing and error-prone.
+  GOAL: User taps OAuth link in WhatsApp → authenticates on phone → done. No copy-paste, no manual steps.
+  DEPENDS ON: Domain name (A record pointing to 135.181.93.227), Web OAuth client credentials from Google Cloud Console.
+-->
+
+#### Context
+
+**Problem 1 (RESOLVED):** Google project was in "Testing" mode — every new user had to be manually pre-added in Google Cloud Console (max 100), tokens expired after 7 days. **FIX:** Published to production. Users see "unverified app" warning (click Advanced → Go to app). No code change needed.
+
+**Problem 2 (THIS PHASE):** `gog auth add --manual` uses `http://localhost:1` as redirect URI. On mobile, this lands on a broken page. Users must copy the URL from the browser address bar and paste it back into WhatsApp. This is confusing and error-prone.
+
+**Solution:** HTTPS callback endpoint via Caddy reverse proxy + server-side token import into gog keyring.
+
+#### New User Experience (After Implementation)
+
+| Step | What happens |
+|------|-------------|
+| 1. User texts WhatsApp | Plugin detects unknown number → creates agent + OAuth URL |
+| 2. Agent asks for name | Normal onboarding conversation |
+| 3. Agent sends OAuth link | "Tap this link to connect your Google account" |
+| 4. User taps link | Opens Google sign-in on their phone's browser |
+| 5. User taps "Allow" | Google redirects to `https://DOMAIN/oauth/callback` |
+| 6. Server handles everything | Exchanges code → imports token → shows success page |
+| 7. User returns to WhatsApp | Agent confirms: "Your Google account is connected!" |
+
+**Total user effort: Tap link → sign in → tap Allow. Done.**
+
+#### Prerequisites (Manual Steps — Before Implementation)
+
+**P0: Verify `gog auth tokens import` exists**
+```bash
+ssh -i ~/.ssh/hetzner root@135.181.93.227
+docker exec don-claudio-bot gog auth tokens --help
+```
+If `import` subcommand exists, proceed. If not, see Fallback section at end.
+
+**P1: Get a domain name (user to do)**
+- Buy a cheap domain (~$1-10/year from Cloudflare, Namecheap, or Porkbun)
+- Point an A record to `135.181.93.227` (e.g., `auth.donclaudio.app` or any subdomain)
+- Caddy handles TLS automatically via Let's Encrypt (zero config beyond the domain name)
+- Only ONE subdomain/domain needed — it's just for the OAuth callback
+
+**P2: Google Cloud Console changes**
+- [x] **Publish to production**: Already done — removes 100-user cap and 7-day token expiry
+- [ ] **Create new OAuth client**: APIs & Services → Credentials → Create → OAuth client ID → "Web application"
+  - Name: `DonClaudioBot Web`
+  - Authorized redirect URIs: `https://DOMAIN/oauth/callback`
+  - Download the credentials JSON (has `"web"` key instead of `"installed"`)
+- [ ] **Upload to server**: Place new credentials at `/root/google-credentials-web/credentials.json` on Hetzner
+
+#### Implementation Tasks
+
+**Task 1: Infrastructure — Caddy Reverse Proxy**
+
+New file: `config/Caddyfile`
+```
+{$OAUTH_DOMAIN} {
+    handle /oauth/* {
+        reverse_proxy don-claudio-bot:3000
+    }
+    handle {
+        respond "Not Found" 404
+    }
+}
+```
+
+Modified file: `docker/docker-compose.yml`
+- [ ] Add `caddy` service (caddy:2-alpine image)
+- [ ] Expose ports 80 + 443 (needed for ACME challenge + HTTPS)
+- [ ] Add `caddy-data` volume (persists TLS certs)
+- [ ] Add `caddy-config` volume
+- [ ] Add new env vars to `don-claudio-bot`:
+  - `GOOGLE_WEB_CLIENT_ID`
+  - `GOOGLE_WEB_CLIENT_SECRET`
+  - `OAUTH_REDIRECT_URI=https://DOMAIN/oauth/callback`
+- [ ] Mount new web credentials: `/root/google-credentials-web/credentials.json:/home/node/.config/gogcli-web/credentials.json:ro`
+
+Security: Caddy only proxies `/oauth/*` — internal APIs (webhooks, state endpoints) remain unexposed.
+
+**Task 2: OAuth State Management**
+
+New file: `onboarding/src/lib/oauth-state.ts` (~50 LOC)
+- [ ] `encodeState(agentId, phone)` → base64url JSON + HMAC-SHA256 signature (using HOOK_TOKEN as secret)
+- [ ] `decodeState(stateParam)` → validates HMAC, checks 30-min expiry, returns `{agentId, phone, nonce}`
+- [ ] Nonce is random 16 bytes, stored in SQLite for single-use verification
+
+Modified file: `onboarding/src/services/state-manager.ts`
+- [ ] Add columns: `oauth_nonce TEXT`, `oauth_url TEXT`, `oauth_status TEXT DEFAULT 'pending'`
+- [ ] New function: `updateOAuthStatus(phone, status)` and `getOAuthNonce(phone)`
+
+**Task 3: OAuth URL Generation at Agent Creation**
+
+Modified file: `onboarding/src/services/agent-creator.ts`
+- [ ] After creating workspace + copying templates (existing step 7), generate CSRF state token with agent ID + phone
+- [ ] Build OAuth URL with correct scopes and `access_type=offline&prompt=consent`
+- [ ] Write URL to `workspace/.oauth-url.txt`
+- [ ] Store nonce in SQLite via state-manager
+
+New file: `onboarding/src/services/oauth-url-generator.ts` (~40 LOC)
+- [ ] Reads `GOOGLE_WEB_CLIENT_ID` and `OAUTH_REDIRECT_URI` from env
+- [ ] Scopes: `https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive openid email`
+- [ ] Returns `{url, nonce}`
+
+**Task 4: OAuth Callback Endpoint**
+
+New file: `onboarding/src/routes/oauth.ts` (~80 LOC)
+
+`GET /oauth/callback?code=AUTH_CODE&state=STATE`
+
+- [ ] Decode + validate state parameter (HMAC + nonce + expiry)
+- [ ] Exchange code for tokens via POST to `https://oauth2.googleapis.com/token`
+  - Uses `GOOGLE_WEB_CLIENT_ID` + `GOOGLE_WEB_CLIENT_SECRET` + redirect URI
+  - Returns `{access_token, refresh_token, scope, id_token}`
+- [ ] Extract user email from id_token (JWT decode, no verification needed — we trust Google's response over HTTPS)
+- [ ] Import refresh token into agent's gog keyring (Task 5)
+- [ ] Update SQLite: `oauth_status = 'complete'`
+- [ ] Return HTML success page: "Connected! You can close this tab and return to WhatsApp."
+
+Mount in `onboarding/src/index.ts`: `app.use('/', oauthRouter);`
+
+**Task 5: Token Import into Agent's Gog Keyring**
+
+New file: `onboarding/src/services/token-importer.ts` (~60 LOC)
+
+`importTokenToAgent(agentId, email, refreshToken)`
+
+- [ ] Read agent's `GOG_KEYRING_PASSWORD` from openclaw.json (via config-writer's readConfig)
+- [ ] Compute workspace path: `$OPENCLAW_STATE_DIR/workspace-$agentId`
+- [ ] Ensure gog config dir exists: `workspace/.gog-config/gogcli/keyring/`
+- [ ] Register credentials (idempotent): `gog auth credentials /path/to/web-credentials.json`
+- [ ] Write temp token file with email, services, scopes, refresh_token
+- [ ] Run: `gog auth tokens import /tmp/token-xxx.json` with env: `GOG_KEYRING_PASSWORD=..., GOG_KEYRING_BACKEND=file, XDG_CONFIG_HOME=workspace/.gog-config`
+- [ ] Delete temp token file immediately (contains secrets)
+
+Note: Runs from main container (not sandbox) — gog is already installed, volume is shared.
+
+**Task 6: Agent Template Updates**
+
+Modified files:
+- [ ] `config/agents/dedicated-en/AGENTS.md` — Replace `gog auth add --manual` section with: read OAuth URL from `/workspace/.oauth-url.txt`, send to user, tell them to tap link. After completion verify with `gog auth list`.
+- [ ] `config/agents/dedicated-en/MEMORY.md` — Simplify Google Services Setup section
+- [ ] `config/agents/dedicated-es/AGENTS.md` — Same changes in Spanish
+- [ ] `config/agents/dedicated-es/MEMORY.md` — Same changes in Spanish
+
+#### Verification Steps
+
+- [ ] **P0 gate**: Verify `gog auth tokens import` works on server before writing any code
+- [ ] **Local docker compose**: `docker compose up` succeeds with Caddy + bot
+- [ ] **TLS works**: `curl https://DOMAIN/oauth/callback` returns 400 (missing params), not connection error
+- [ ] **OAuth flow**: Text from test phone → agent sends OAuth link → tap link → authenticate → return to WhatsApp → agent confirms connection
+- [ ] **gog commands work**: Agent can run `gog auth list`, `gog gmail search 'newer_than:1d'`
+- [ ] **CSRF protection**: Forged state parameter returns error page
+- [ ] **Existing users unaffected**: Previously onboarded users still work normally
+
+#### Key Files
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `config/Caddyfile` | NEW | Reverse proxy config |
+| `onboarding/src/routes/oauth.ts` | NEW | Callback handler |
+| `onboarding/src/services/oauth-url-generator.ts` | NEW | URL construction + CSRF |
+| `onboarding/src/services/token-importer.ts` | NEW | gog keyring token import |
+| `onboarding/src/lib/oauth-state.ts` | NEW | HMAC state token encode/decode |
+| `docker/docker-compose.yml` | MODIFY | Add Caddy, env vars |
+| `onboarding/src/index.ts` | MODIFY | Mount oauth router |
+| `onboarding/src/services/agent-creator.ts` | MODIFY | Generate OAuth URL at creation |
+| `onboarding/src/services/state-manager.ts` | MODIFY | OAuth columns |
+| `config/agents/dedicated-en/AGENTS.md` | MODIFY | New OAuth instructions |
+| `config/agents/dedicated-en/MEMORY.md` | MODIFY | New OAuth instructions |
+| `config/agents/dedicated-es/AGENTS.md` | MODIFY | New OAuth instructions (ES) |
+| `config/agents/dedicated-es/MEMORY.md` | MODIFY | New OAuth instructions (ES) |
+
+#### Estimated Scope
+
+- ~5 new files, ~280 LOC of new TypeScript
+- ~5 modified files, ~40 LOC of changes
+- Caddy config: ~10 lines
+- Docker compose changes: ~25 lines
+- Agent templates: ~40 lines updated across 4 files
+
+#### Fallback: If `gog auth tokens import` Doesn't Exist
+
+If the command doesn't exist in v0.9.0:
+
+**Option A — Pipe to gog auth add**: The callback stores the auth code in SQLite. Write `pending-code.txt` to workspace. AGENTS.md instructs agent: "If `pending-code.txt` exists, run `echo 'http://localhost:1/?code=CODE' | gog auth add EMAIL --manual --services gmail,calendar,drive`". This feeds the redirect URL to gog via stdin.
+
+**Option B — Skip gog for token storage**: Use `google-auth-library` (Node.js) directly. Store tokens in a JSON file. Write a thin CLI wrapper the agent uses instead of `gog gmail/calendar` commands. More work, but fully under our control.
+
+#### Rollback Plan
+
+- If Caddy fails: Remove caddy service from compose, revert to SSH-tunnel-only access
+- If token import fails: Fall back to existing `gog auth add --manual` flow (still works, just bad UX)
+- If callback endpoint crashes: Agent templates still have manual auth instructions as fallback
+
+**Status:** pending
+
+---
+
 ## Key Questions
 <!--
   WHAT: Important questions you need to answer during the task.
@@ -1015,17 +852,12 @@ DeepWiki (2026-02-07) claims "bindings related to channels should be picked up w
 7. **Have I validated the template locally?** (npx openclaw config validate)
 8. **Is this my 3rd+ deployment attempt?** (If yes, STOP and follow 3-Strike Protocol)
 
-### Phase 10 Specific Questions (Multi-Language Templates)
-14. **~What should the English agent be named?~** ✅ **DECIDED: "Mr Botly"** (avoids copyright, friendly name)
-15. **~Should we add more country codes now?~** ✅ **DECIDED: Yes** - Added +44 (UK), +61 (Australia), +91 (India) all → dedicated-en
-16. **~Should the "onboarding" agent be removed from config?~** ✅ **DECIDED: Yes, remove entirely** - See Task 0 for detailed reasoning with QMD MCP references about sticky session problem
-17. **~Should we support language preference override?~** ✅ **DECIDED: No** - Let agent handle conversationally if user prefers different language
-18. **~How do we handle edge cases like +1 but user speaks Spanish?~** ✅ **DECIDED: Option B** - Agent adapts in conversation (user can say "hablo español", agent switches or offers to switch templates)
-
-**Additional Questions from Task 0:**
-19. **Will first message be dropped?** Possibly, if webhook is slow. User will retry naturally. Better than trapping user in wrong agent.
-20. **Do we need an onboarding agent at all?** No - v2 uses webhook-based flow, not intake agent pattern like Clawd4All v1.
-21. **What if user gets stuck in wrong session?** This is WHY we're removing the onboarding agent - to prevent this exact problem.
+### Phase 15 Specific Questions (Seamless OAuth Flow)
+22. **Does `gog auth tokens import` exist in v0.9.0?** Must verify on server before writing code. If not, use Fallback Option A or B.
+23. **What domain name will be used?** User needs to buy + point A record to 135.181.93.227.
+24. **Does Hetzner firewall allow ports 80/443?** Caddy needs both for ACME + HTTPS. May need firewall rule.
+25. **Can main container write to agent workspace paths?** Token import needs write access to `workspace-<agentId>/`.
+26. **Does `gog auth credentials` accept web client JSON?** Web client JSON has `"web"` key vs `"installed"` — verify gog handles both.
 
 ### Phase 9 Specific Questions (Google OAuth)
 9. **Does gog respect `GOG_CREDENTIALS_PATH` env var?** If not, need symlink approach in setupCommand.
@@ -1051,31 +883,6 @@ DeepWiki (2026-02-07) claims "bindings related to channels should be picked up w
 | **TEMPLATE FIX:** Update schema only | Changed `gateway.token` → `gateway.auth.token`, kept rest |
 | **STOP at circular debugging** | 3-Strike Error Protocol - pause and reassess approach |
 
-### Phase 10 Decisions (Multi-Language Templates)
-| Decision | Rationale |
-|----------|-----------|
-| **REMOVE "onboarding" agent entirely** (Task 0) | Prevents "sticky session" trap - users getting stuck in wrong agent due to OpenClaw session behavior. See detailed reasoning in Task 0 with QMD MCP references. |
-| **English agent name: "Mr Botly"** | Avoids copyright issues, friendly and memorable name for users |
-| **More English country codes: +1, +44, +61, +91** | Covers US/Canada, UK, Australia, India - major English-speaking regions |
-| **JSON config for phone→language mapping** | Easy to edit, version controlled, no database needed, no code deployment for new languages |
-| **Spanish as default language** | Current system is Spanish-first, matches Chile origin, fallback for unmapped countries |
-| **Folder-based template structure** (`dedicated-en`, `dedicated-es`) | Matches current pattern, easy to add new languages as new folders |
-| **Graceful degradation on missing config** | System continues working with default if config file missing, logs warning for admin |
-| **Language detection in dedicated function** | Keeps agent-creator.ts clean, testable in isolation, easy to extend |
-| **No manual language override** | Simpler system - let agent handle conversationally if user prefers different language (e.g., +1 user speaks Spanish) |
-| **Accept first message may be dropped** | Better than trapping user in wrong "sticky" session. Users will naturally retry. |
-
-### Phase 12 Decisions (message_received Plugin)
-| Decision | Rationale |
-|----------|-----------|
-| **Replace session watcher with plugin** | Event-driven (instant) vs polling (5s delay). ~146 lines → ~50 lines. No JSON5 parsing. |
-| **Plugin calls existing webhook (not inline)** | Plugin API has no `createAgent()` (Pattern 69). Webhook is idempotent, battle-tested, and handles SQLite + config + restart. |
-| **In-memory `knownPhones` cache** | Prevents HTTP call on every message from known users. Lost on restart = one extra webhook call (returns "existing"). |
-| **Copy plugin via entrypoint, not Dockerfile COPY alone** | Volume mount at `/home/node/.openclaw/` overrides image layer. Entrypoint copies from staged `/app/config/extensions/` to volume. Same pattern as welcome agent migration. |
-| **Keep session-watcher.ts as reference** | Don't delete until Phase 12 verified in production. Enables instant rollback. |
-| **Keep SIGUSR1 restart chain** | Bindings hot-reload bug (Pattern 68) still NOT fixed. No alternative. |
-| **Keep Welcome Agent** | Plugin can't reroute messages (Pattern 67). First message still needs catch-all. |
-| **Use `api.logger` not `console.log`** | Plugin convention — Gateway may redirect plugin logs to separate file. |
 
 ### Phase 13 Decisions (Gateway Restart Elimination Research)
 | Decision | Rationale |
@@ -1086,15 +893,18 @@ DeepWiki (2026-02-07) claims "bindings related to channels should be picked up w
 | **DeepWiki unreliable on this topic** | Claims bindings are hot-reloadable — proven wrong by source code. Trust `config-reload.ts:72` only. |
 | **Use Node 22 built-in `fetch()`** | No new dependencies. Available in our runtime (node:22-bookworm-slim). |
 
-### Phase 9 Decisions (Google OAuth)
+### Phase 15 Decisions (Seamless WhatsApp OAuth Flow)
 | Decision | Rationale |
 |----------|-----------|
-| **Bind mount for credentials** (`./config:/credentials:ro`) | Easiest setup: credentials managed on host, read-only for security, easy to update without rebuilding image |
-| **One-time `gog auth credentials` setup** | Shared OAuth client used by all agents; only needs to run once after deployment |
-| **Per-user `GOG_CONFIG_DIR`** (already implemented) | Isolates OAuth tokens per agent; each phone number gets unique directory |
-| **Manual OAuth flow (`--manual` flag)** | Sandboxes are headless (no browser); agent guides user to copy-paste auth code |
-| **Agent-side auth instructions in MEMORY.md** | Users self-service through WhatsApp conversation; no admin intervention needed per user |
-| **Sandbox network: `bridge` (required)** | OAuth flow needs network access to Google; `none` would block auth |
+| **Caddy for TLS** | Auto-TLS via Let's Encrypt, zero config beyond domain name, Alpine image (~40MB) |
+| **Only proxy `/oauth/*`** | Keeps webhooks, state endpoints, Gateway UI unexposed to internet |
+| **HMAC-SHA256 state parameter** | CSRF protection using existing HOOK_TOKEN as secret — no new secrets needed |
+| **30-min state expiry + single-use nonce** | Prevents replay attacks, nonce stored in SQLite |
+| **Token import from main container** | gog already installed, volume shared, no Docker API calls needed |
+| **Web OAuth client (not installed)** | `"web"` client type supports HTTPS redirect URIs; `"installed"` only supports localhost |
+| **Google project published to production** | Removes 100-user cap and 7-day token expiry. Users see "unverified app" warning (acceptable) |
+| **JWT decode without verification for id_token** | Token comes from Google over HTTPS in token exchange response — trusted source |
+| **Write `.oauth-url.txt` to workspace** | Agent reads it when user asks to connect Google — decouples URL generation from agent template logic |
 
 ## Prevention Rules
 <!--
@@ -1192,54 +1002,6 @@ If you find yourself doing any of these, STOP and reassess:
 - **Volume Persistence:** don-claudio-state volume survives deployments (WhatsApp auth lives here)
 - **Never run:** `docker volume rm don-claudio-state` unless you want to re-authenticate WhatsApp
 - **Server State:** Fresh Hetzner VPS - no containers, no volumes (wiped 2026-02-02 per older file tasks.md)
-
-**RESUMING TOMORROW - Read this first:**
-
-**RESOLVED (2026-02-02):** Root cause identified - env var name mismatch.
-
-**The fix:** Changed `GATEWAY_TOKEN` → `OPENCLAW_GATEWAY_TOKEN` in 5 files:
-1. `config/openclaw.json.template` - Template substitution var
-2. `.env.example` - Documentation
-3. `docker/docker-compose.yml` - Container env var
-4. `.env` - Actual token value (preserved)
-5. `onboarding/src/lib/audit-logger.ts` - Sensitive keys for redaction
-
-**Evidence from QMD research (5-10 searches):**
-- `OPENCLAW_GATEWAY_TOKEN`: 32 matches in OpenClaw reference docs
-- `GATEWAY_TOKEN`: 0 matches (only found in project files)
-- Key docs: gateway/protocol.md:183, web/dashboard.md:35, gateway/configuration.md:329
-
-**Next steps:**
-1. Rebuild Docker image with new env var names
-2. Deploy to Hetzner with fresh volume (recommended) or test locally first
-3. Verify Gateway starts without "no token" error
-
-**Files changed today:**
-- `config/openclaw.json.template` - Fixed schema: `gateway.token` → `gateway.auth.token`
-- `.env` - Generated proper tokens
-- `.env.example` - Updated comments
-- `docker/docker-compose.yml` - No change needed (already correct)
-- `task_plan.md`, `findings.md`, `progress.md` - Updated with today's work
-
----
-
-## Migration Notes (from old removed tasks.md)
-
-### Completed Tasks (9/11) - Mapped to Phase 0
-The following tasks from the removed tasks.md are COMPLETE and documented in Phase 0 above:
-- P0-DEPLOY-000: Pre-deployment backup procedure ✓
-- P0-DEPLOY-001: Verify prerequisites ✓
-- P0-DEPLOY-002: Install OpenClaw CLI in container ✓
-- P0-DEPLOY-003: Standardize paths ATOMICALLY ✓
-- P0-DEPLOY-004: Runtime env vars in .env.example ✓
-- P0-DEPLOY-005: deploy.sh with health checks ✓
-- P0-DEPLOY-006: Dual-process launcher ✓
-- P0-DEPLOY-007: Local integration test ✓
-- P0-DEPLOY-008: Rollback procedure ✓
-
-### Pending Tasks (2/11) - Mapped to Phases 1-6
-- **P0-DEPLOY-009** → Mapped to Phases 1, 2, 3, 5, 6 (Verify, Deploy, Auth, Test, Document)
-- **P1-DEPLOY-010** → Mapped to Phase 4 (Sandbox image build)
 
 ### Git History Context
 Recent commits show:

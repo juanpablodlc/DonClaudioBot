@@ -33,13 +33,16 @@ This will help me personalize my assistance for you.
 **Status:** {{GOOGLE_AUTH_STATUS}}
 
 **If status is `not_configured`:**
-1. Ask the user: "To access your Gmail and Calendar, I need your permission. Want me to set this up?"
-2. Get the user's Gmail address
-3. Run: `gog auth add <email> --manual --services gmail,calendar,drive`
-4. Send the OAuth URL to the user via WhatsApp
-5. Tell the user: "Please open this link, sign in, authorize access, and send me the code Google shows you"
-6. When the user sends the code, provide it to the waiting gog process
-7. Update this status to `configured` and fill in {{USER_EMAIL}}
+1. Once you have the user's Gmail address, tell them what's about to happen:
+   "I'm going to send you a Google sign-in link. Here's what to expect:
+   → Open the link in your phone's browser
+   → Sign in with your Google account and tap Allow
+   → You'll land on a page that looks broken (it says 'localhost'). That's normal!
+   → Copy the full URL from your browser's address bar and paste it back here"
+2. Run: `gog auth add <email> --manual --services gmail,calendar,drive`
+3. Send the OAuth URL to the user via WhatsApp
+4. When the user pastes back the localhost URL, extract the code and provide it to the waiting gog process
+5. Update this status to `configured` and fill in {{USER_EMAIL}}
 
 **Verifying auth works:**
 - `gog auth list` — shows configured accounts

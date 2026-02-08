@@ -1,15 +1,17 @@
 // OAuth Callback Route
 // Handles Google OAuth redirect after user grants consent
+// State parameter is a short opaque nonce (32 hex chars) that maps to
+// a server-side record in SQLite. This avoids long base64 URLs that
+// WhatsApp corrupts during link rendering.
 
 import { Router } from 'express';
-import { decodeState } from '../lib/oauth-state.js';
-import { consumeOAuthNonce, setOAuthStatus } from '../services/state-manager.js';
+import { lookupOAuthNonce, setOAuthStatus } from '../services/state-manager.js';
 import { importTokenToAgent } from '../services/token-importer.js';
 
 export const router = Router();
 
 /**
- * GET /oauth/callback?code=AUTH_CODE&state=STATE
+ * GET /oauth/callback?code=AUTH_CODE&state=NONCE
  * Google redirects here after user grants consent
  */
 router.get('/oauth/callback', async (req, res) => {
@@ -26,17 +28,16 @@ router.get('/oauth/callback', async (req, res) => {
   }
 
   try {
-    // Step 1: Decode and validate HMAC-signed state
-    const payload = decodeState(state);
-
-    // Step 2: Verify single-use nonce
-    const nonceValid = consumeOAuthNonce(payload.phone, payload.nonce);
-    if (!nonceValid) {
-      console.warn(`[oauth] Invalid or already-used nonce for ${payload.phone}`);
+    // Step 1: Look up nonce in DB to get phone and agentId
+    const record = lookupOAuthNonce(state);
+    if (!record) {
+      console.warn(`[oauth] Invalid or already-used nonce: ${state}`);
       return res.status(400).send(errorPage('This link has already been used or has expired. Please request a new one from your assistant.'));
     }
 
-    // Step 3: Exchange auth code for tokens
+    const { phone, agentId } = record;
+
+    // Step 2: Exchange auth code for tokens
     const clientId = process.env.GOOGLE_WEB_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_WEB_CLIENT_SECRET;
     const redirectUri = process.env.OAUTH_REDIRECT_URI;
@@ -60,7 +61,7 @@ router.get('/oauth/callback', async (req, res) => {
     if (!tokenResponse.ok) {
       const err = await tokenResponse.text();
       console.error(`[oauth] Token exchange failed: ${err}`);
-      setOAuthStatus(payload.phone, 'failed');
+      setOAuthStatus(phone, 'failed');
       return res.status(500).send(errorPage('Failed to exchange authorization code. Please try again.'));
     }
 
@@ -73,11 +74,11 @@ router.get('/oauth/callback', async (req, res) => {
 
     if (!tokens.refresh_token) {
       console.error('[oauth] No refresh_token in response (user may have already granted access)');
-      setOAuthStatus(payload.phone, 'failed');
+      setOAuthStatus(phone, 'failed');
       return res.status(500).send(errorPage('No refresh token received. Please revoke app access in your Google Account settings and try again.'));
     }
 
-    // Step 4: Extract email from id_token (JWT decode, no verification — trusted source)
+    // Step 3: Extract email from id_token (JWT decode, no verification — trusted source)
     let email = 'unknown';
     if (tokens.id_token) {
       try {
@@ -87,10 +88,10 @@ router.get('/oauth/callback', async (req, res) => {
       } catch { /* fall back to 'unknown' */ }
     }
 
-    // Step 5: Import token into agent's gog keyring
-    await importTokenToAgent(payload.agentId, email, tokens.refresh_token);
+    // Step 4: Import token into agent's gog keyring
+    await importTokenToAgent(agentId, email, tokens.refresh_token);
 
-    console.log(`[oauth] Successfully completed OAuth for ${email} → agent ${payload.agentId}`);
+    console.log(`[oauth] Successfully completed OAuth for ${email} → agent ${agentId}`);
     return res.status(200).send(successPage(email));
 
   } catch (err) {

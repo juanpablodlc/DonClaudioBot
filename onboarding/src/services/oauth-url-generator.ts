@@ -1,7 +1,8 @@
 // OAuth URL Generator
-// Builds Google OAuth consent URL with CSRF state for WhatsApp users
+// Builds Google OAuth consent URL with opaque nonce as state parameter
+// The nonce is short (32 hex chars) to prevent WhatsApp URL corruption
 
-import { encodeState } from '../lib/oauth-state.js';
+import { generateNonce } from '../lib/oauth-state.js';
 
 const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 
@@ -19,7 +20,8 @@ interface OAuthUrlResult {
 }
 
 /**
- * Generate Google OAuth consent URL with signed CSRF state
+ * Generate Google OAuth consent URL with opaque nonce as state
+ * The nonce is stored server-side (SQLite) alongside agentId and phone.
  */
 export function generateOAuthUrl(agentId: string, phone: string): OAuthUrlResult {
   const clientId = process.env.GOOGLE_WEB_CLIENT_ID;
@@ -28,7 +30,7 @@ export function generateOAuthUrl(agentId: string, phone: string): OAuthUrlResult
   if (!clientId) throw new Error('GOOGLE_WEB_CLIENT_ID not set');
   if (!redirectUri) throw new Error('OAUTH_REDIRECT_URI not set');
 
-  const { state, nonce } = encodeState(agentId, phone);
+  const nonce = generateNonce();
 
   const params = new URLSearchParams({
     client_id: clientId,
@@ -37,7 +39,7 @@ export function generateOAuthUrl(agentId: string, phone: string): OAuthUrlResult
     scope: SCOPES,
     access_type: 'offline',
     prompt: 'consent',
-    state,
+    state: nonce,
   });
 
   return { url: `${GOOGLE_AUTH_ENDPOINT}?${params.toString()}`, nonce };

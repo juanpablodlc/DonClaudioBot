@@ -170,6 +170,26 @@ export function consumeOAuthNonce(phone: string, nonce: string): boolean {
 }
 
 /**
+ * Look up OAuth nonce and consume it (single-use).
+ * The nonce is used as the OAuth state parameter.
+ * Returns { phone, agentId } if valid, null if not found or already used.
+ */
+export function lookupOAuthNonce(nonce: string): { phone: string; agentId: string } | null {
+  if (!db) initDatabase();
+  const row = db!.prepare(
+    'SELECT phone_number, agent_id FROM onboarding_states WHERE oauth_nonce = ?'
+  ).get(nonce) as { phone_number: string; agent_id: string } | undefined;
+
+  if (!row) return null;
+
+  // Consume nonce (single-use)
+  db!.prepare('UPDATE onboarding_states SET oauth_nonce = NULL, oauth_status = ? WHERE phone_number = ?')
+    .run('complete', row.phone_number);
+
+  return { phone: row.phone_number, agentId: row.agent_id };
+}
+
+/**
  * Set OAuth status for a phone number
  */
 export function setOAuthStatus(phone: string, status: string): void {
